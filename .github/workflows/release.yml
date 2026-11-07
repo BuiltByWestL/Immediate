@@ -1,0 +1,80 @@
+# Release: push a tag like v0.2.0 (matching the version in tauri.conf.json and package.json).
+# Builds signed installers for Windows, macOS (Apple Silicon + Intel) and Linux, attaches them to
+# a GitHub release, then publishes the updater manifest (latest.json) to the `updates` branch.
+#
+# Needs two repository secrets (Settings > Secrets and variables > Actions):
+#   TAURI_SIGNING_PRIVATE_KEY           contents of %USERPROFILE%\.tauri\immediate.key
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  contents of %USERPROFILE%\.tauri\immediate.key.password
+# The key signs updates; installed copies only accept updates signed with it.
+
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --bundles nsis
+          - os: macos-latest
+            args: --target aarch64-apple-darwin --bundles app,dmg
+          - os: macos-latest
+            args: --target x86_64-apple-darwin --bundles app,dmg
+          - os: ubuntu-22.04
+            args: --bundles deb,appimage
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev
+      - run: npm ci
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: Immediate ${{ github.ref_name }}
+          releaseBody: See the commits since the last release.
+          releaseDraft: false
+          prerelease: false
+          # The manifest is published separately (private-repo aware), below.
+          includeUpdaterJson: false
+          args: ${{ matrix.args }}
+
+  manifest:
+    needs: build
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - name: Publish latest.json to the updates branch
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          IMMEDIATE_REPO: ${{ github.repository }}
+        # Add --public once the repository is public (browser download URLs, no token needed).
+        run: node scripts/gen-latest-json.mjs ${{ github.ref_name }}

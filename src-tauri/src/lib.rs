@@ -149,7 +149,9 @@ pub fn run() {
             wm::inbox_take,
             wm::open_in_new_window,
             update::update_check,
-            update::update_install
+            update::update_install,
+            update::update_token_set,
+            update::update_token_present
         ])
         .build(tauri::generate_context!())
         .expect("error while starting Immediate");

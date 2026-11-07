@@ -1,5 +1,6 @@
 <script lang="ts">
   import { getVersion } from "@tauri-apps/api/app";
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import oflText from "../../fonts/OFL.txt?raw";
@@ -26,12 +27,29 @@
   let custom = $state<Theme[]>(customThemes());
   let version = $state("");
   let showOfl = $state(false);
+  let tokenPresent = $state(false);
+  let tokenDraft = $state("");
+  let tokenBusy = $state(false);
+
+  async function saveToken(value: string) {
+    tokenBusy = true;
+    try {
+      tokenPresent = await invoke<boolean>("update_token_set", { token: value });
+      tokenDraft = "";
+      if (tokenPresent) checkForUpdates(true);
+    } catch (e) {
+      toast(String(e), "error");
+    } finally {
+      tokenBusy = false;
+    }
+  }
   let helveticaInstalled = $state(false);
 
   onMount(() => {
     helveticaInstalled = fontInstalled("Helvetica Neue");
     if (!inTauri) return;
     getVersion().then((v) => (version = v));
+    invoke<boolean>("update_token_present").then((p) => (tokenPresent = p));
     checkTools();
     invoke<Theme[]>("themes_custom").then((list) => {
       setCustomThemes(list);
@@ -135,6 +153,24 @@
             </span>
             <button type="button" class="btn" disabled={!inTauri || updates.phase === "checking"} onclick={() => checkForUpdates(true)}>Check now</button>
           </div>
+          {#if s.mode === "advanced" || !tokenPresent}
+            <div class="token">
+              <p class="note first">
+                While Immediate’s repository is private, updates need a read-only GitHub access token.
+                <button type="button" class="link" onclick={() => openUrl("https://github.com/settings/personal-access-tokens/new")}>Create one</button>
+                with access to the Immediate repository and the permission “Contents: Read-only”, then paste it here. It’s kept in {window.__IMMEDIATE__?.platform === "windows" ? "Windows Credential Manager" : window.__IMMEDIATE__?.platform === "macos" ? "the Keychain" : "a private file"}.
+              </p>
+              <div class="row">
+                {#if tokenPresent}
+                  <span class="dim">A token is saved.</span>
+                  <button type="button" class="btn" disabled={tokenBusy} onclick={() => saveToken("")}>Remove</button>
+                {:else}
+                  <input class="field grow" type="password" placeholder="github_pat_…" bind:value={tokenDraft} spellcheck="false" autocomplete="off" />
+                  <button type="button" class="btn" disabled={tokenBusy || !tokenDraft.trim()} onclick={() => saveToken(tokenDraft)}>Save</button>
+                {/if}
+              </div>
+            </div>
+          {/if}
         </section>
       {:else if ui.settingsSection === "appearance"}
         <section>
@@ -369,6 +405,12 @@
     justify-content: space-between;
     gap: var(--s4);
     min-height: 36px;
+  }
+  .token {
+    margin-top: var(--s3);
+  }
+  .grow {
+    flex: 1;
   }
   .suffix {
     width: 140px;
