@@ -23,6 +23,34 @@
     return r;
   });
 
+  const NAMES: Record<string, string> = { h264: "H.264", hevc: "HEVC", av1: "AV1", vp9: "VP9", vp8: "VP8", prores: "ProRes", mpeg4: "MPEG-4", mpeg2video: "MPEG-2", aac: "AAC", mp3: "MP3", opus: "Opus", flac: "FLAC", vorbis: "Vorbis", ac3: "AC-3", eac3: "E-AC-3", alac: "ALAC", subrip: "SRT", ass: "ASS", mov_text: "Text" };
+  const cname = (c: string) => NAMES[c] ?? (c?.startsWith("pcm_") ? "PCM" : c?.toUpperCase());
+  const rate = (b: any) => {
+    const n = Number(b);
+    return !n ? "" : n >= 1e6 ? `${(n / 1e6).toFixed(1)} Mb/s` : `${Math.round(n / 1000)} kb/s`;
+  };
+  const tracks = $derived.by(() => {
+    const p = ui.probe;
+    if (!p?.streams) return [];
+    const rows: [string, string][] = [];
+    for (const s of p.streams) {
+      const lang = s.tags?.language && s.tags.language !== "und" ? ` · ${s.tags.language}` : "";
+      if (s.codec_type === "video" && s.disposition?.attached_pic !== 1) {
+        const [n, d] = String(s.avg_frame_rate ?? "0/1").split("/").map(Number);
+        const fps = d ? Math.round((n / d) * 100) / 100 : 0;
+        rows.push(["Video", [cname(s.codec_name) + (s.profile ? ` ${s.profile}` : ""), `${s.width}×${s.height}`, fps ? `${fps} fps` : "", rate(s.bit_rate)].filter(Boolean).join(" · ")]);
+      } else if (s.codec_type === "audio") {
+        const ch = s.channels === 1 ? "mono" : s.channels === 2 ? "stereo" : `${s.channels} ch`;
+        rows.push(["Audio", [cname(s.codec_name), s.sample_rate ? `${Number(s.sample_rate) / 1000} kHz` : "", ch, rate(s.bit_rate)].filter(Boolean).join(" · ") + lang]);
+      } else if (s.codec_type === "subtitle") {
+        rows.push(["Subtitles", cname(s.codec_name) + lang]);
+      }
+    }
+    if (p.format?.bit_rate) rows.push(["Bitrate", rate(p.format.bit_rate)]);
+    if (p.format?.format_long_name) rows.push(["Container", p.format.format_long_name]);
+    return rows;
+  });
+
   const location = $derived.by(() => {
     const l = ui.details?.location;
     if (!l) return null;
@@ -59,6 +87,18 @@
       {/each}
     </dl>
   </section>
+
+  {#if tracks.length}
+    <section>
+      <h3>Streams</h3>
+      <dl>
+        {#each tracks as [k, v], i (i)}
+          <dt>{k}</dt>
+          <dd class="num">{v}</dd>
+        {/each}
+      </dl>
+    </section>
+  {/if}
 
   {#if ui.details?.exif.length || location}
     <section>

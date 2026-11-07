@@ -33,7 +33,8 @@ export function canPreview(f: OpenedFile): boolean {
 
 /** Pictures the editor opens (vector and icon files are view only). */
 export function canEdit(f: OpenedFile): boolean {
-  return f.kind === "image" && f.ext !== "svg" && f.ext !== "ico" && canPreview(f);
+  if (f.kind !== "image") return true; // video/audio editing goes through media tools
+  return f.ext !== "svg" && f.ext !== "ico" && canPreview(f);
 }
 
 export function isNativeImagePath(path: string): boolean {

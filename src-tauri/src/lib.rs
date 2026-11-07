@@ -2,6 +2,7 @@ mod chrome;
 mod files;
 mod formats;
 mod image;
+mod media;
 mod settings;
 mod themes;
 mod tools;
@@ -128,6 +129,15 @@ pub fn run() {
             themes::themes_custom,
             themes::themes_folder,
             tools::tools_status,
+            media::media_tools,
+            media::media_probe,
+            media::media_keyframes,
+            media::media_waveform,
+            media::media_frame,
+            media::install::tools_install,
+            media::export::media_export,
+            media::export::media_cancel,
+            media::export::media_grab_frame,
             wm::inbox_take,
             wm::open_in_new_window,
             update::update_check,

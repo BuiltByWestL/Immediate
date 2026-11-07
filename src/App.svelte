@@ -13,6 +13,11 @@
   import Filmstrip from "./app/viewer/Filmstrip.svelte";
   // The editor loads the first time it's opened, keeping startup light.
   const loadEditor = () => import("./modes/image/ImageEditor.svelte");
+  const loadMediaEditor = () => import("./modes/media/MediaEditor.svelte");
+  import { beginMediaEdit, cancelMediaEdit, saveMedia } from "./modes/media/actions";
+  import { mediaKeys } from "./modes/media/keys";
+  import { changeMedia, media, mediaChanged, redoMedia, undoMedia } from "./modes/media/session.svelte";
+  import { prepareToolsInBackground } from "./lib/tools.svelte";
   import { beginEdit, cancelEdit, copyEdited, save } from "./modes/image/actions";
   import { editor, hasChanges, redo, undo } from "./modes/image/editor.svelte";
   import { canEdit } from "./lib/formats";
@@ -38,6 +43,7 @@
   onMount(() => {
     connect();
     if (!inTauri) return;
+    prepareToolsInBackground();
     // Files dragged from Explorer/Finder. (Tauri delivers real paths; HTML drag events don't.)
     const unlisten = getCurrentWebview().onDragDropEvent((e) => {
       const p = e.payload;
@@ -46,9 +52,10 @@
       else if (p.type === "drop") {
         ui.dropping = false;
         // Never throw away edits: files dropped on a window with edits open in a new window.
-        if (hasChanges()) newWindow(p.paths);
+        if (hasChanges() || mediaChanged()) newWindow(p.paths);
         else {
           if (editor.active) cancelEdit();
+          if (media.active) cancelMediaEdit();
           openPaths(p.paths);
         }
       }
@@ -56,11 +63,11 @@
     // Closing a window with unsaved edits asks first.
     const win = getCurrentWindow();
     const unclose = win.onCloseRequested(async (e) => {
-      if (!hasChanges()) return;
+      if (!hasChanges() && !mediaChanged()) return;
       e.preventDefault();
       const ok = await ask({
         title: "Close without saving?",
-        body: "Your edits to this photo will be lost.",
+        body: "Your edits will be lost.",
         ok: "Close",
         cancel: "Keep editing",
         danger: true,
@@ -87,6 +94,28 @@
     const key = e.key;
 
     if (ui.confirm) return;
+    if (media.active && !ui.dialog) {
+      const k = key.toLowerCase();
+      if (mod) {
+        if (k === "z" && !e.shiftKey) undoMedia();
+        else if ((k === "z" && e.shiftKey) || k === "y") redoMedia();
+        else if (k === "s") saveMedia(e.shiftKey ? "as" : "copy");
+        else if (k === "w") getCurrentWindow().close();
+        else if (k === ",") ui.dialog = "settings";
+        else return;
+        e.preventDefault();
+        return;
+      }
+      if (typing(e.target)) return;
+      if (key === "Escape") cancelMediaEdit();
+      else if ((key === "Delete" || key === "Backspace") && media.selection) {
+        const s = { ...media.selection };
+        changeMedia((ed) => ed.cuts.push(s));
+        media.selection = null;
+      } else if (!mediaKeys.handler?.(e)) return;
+      e.preventDefault();
+      return;
+    }
     if (mod && editor.active) {
       const k = key.toLowerCase();
       if (k === "z" && !e.shiftKey) undo();
@@ -139,7 +168,7 @@
     else if (key === " " && viewer.media && !onMedia) {
       viewer.media.paused ? viewer.media.play() : viewer.media.pause();
     } else if (key.toLowerCase() === "i" && ui.file) updateSettings({ infoOpen: !ui.settings.infoOpen });
-    else if (key.toLowerCase() === "e" && ui.file && canEdit(ui.file)) beginEdit();
+    else if (key.toLowerCase() === "e" && ui.file && canEdit(ui.file)) ui.file.kind === "image" ? beginEdit() : beginMediaEdit();
     else if (key === "?") ui.dialog = "shortcuts";
     else if (key === "F11") toggleFullscreen();
     else if (key === "Escape") getCurrentWindow().setFullscreen(false);
@@ -156,7 +185,13 @@
 <div class="app">
   <Toolbar />
   <div class="main">
-    {#if ui.file && editor.active}
+    {#if ui.file && media.active}
+      {#key ui.file.path}
+        {#await loadMediaEditor() then m}
+          <m.default file={ui.file} />
+        {/await}
+      {/key}
+    {:else if ui.file && editor.active}
       {#key ui.file.path}
         {#await loadEditor() then m}
           <m.default file={ui.file} />

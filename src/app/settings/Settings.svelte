@@ -5,8 +5,9 @@
   import oflText from "../../fonts/OFL.txt?raw";
   import { ACCENTS, BUILTIN, GROUPS, customThemes, findTheme, resolveTheme, setCustomThemes, withAccent, type Theme } from "../../design/theme";
   import { inTauri, toast, ui, updateSettings } from "../../lib/app.svelte";
-  import type { Settings, ToolsStatus } from "../../lib/types";
+  import type { Settings } from "../../lib/types";
   import { checkForUpdates, updates } from "../../lib/updates.svelte";
+  import { checkTools, installTools, tools } from "../../lib/tools.svelte";
   import Sheet from "../Sheet.svelte";
   import ShortcutList from "../ShortcutList.svelte";
   import ThemeCard from "./ThemeCard.svelte";
@@ -23,7 +24,6 @@
   const set = (patch: Partial<Settings>) => updateSettings(patch);
 
   let custom = $state<Theme[]>(customThemes());
-  let tools = $state<ToolsStatus | null>(null);
   let version = $state("");
   let showOfl = $state(false);
   let helveticaInstalled = $state(false);
@@ -32,7 +32,7 @@
     helveticaInstalled = fontInstalled("Helvetica Neue");
     if (!inTauri) return;
     getVersion().then((v) => (version = v));
-    invoke<ToolsStatus>("tools_status").then((t) => (tools = t));
+    checkTools();
     invoke<Theme[]>("themes_custom").then((list) => {
       setCustomThemes(list);
       custom = list;
@@ -244,18 +244,30 @@
         <section>
           <h3>Media tools</h3>
           <p class="note first">
-            Video and audio editing uses ffmpeg, a free media toolkit. If it isn’t on this computer, Immediate sets it up by itself the first time you edit a video or audio file. Photos never need it.
+            Video and audio editing uses ffmpeg, a free media toolkit that runs as a separate program. Immediate sets it up by itself when needed. Photos never need it.
           </p>
-          {#if tools}
+          {#if tools.found === undefined}
+            <p class="dim">Looking…</p>
+          {:else if tools.found}
             <dl class="facts">
-              <dt>ffmpeg</dt>
-              <dd>{#if tools.ffmpeg}<span class="num">{tools.ffmpeg.version}</span> <span class="dim path">{tools.ffmpeg.path}</span>{:else}<span class="dim">Not found</span>{/if}</dd>
-              <dt>ffprobe</dt>
-              <dd>{#if tools.ffprobe}<span class="num">{tools.ffprobe.version}</span> <span class="dim path">{tools.ffprobe.path}</span>{:else}<span class="dim">Not found</span>{/if}</dd>
+              <dt>Version</dt>
+              <dd class="num">{tools.found.version}</dd>
+              <dt>Source</dt>
+              <dd>{tools.found.managed ? "Installed by Immediate" : "Already on this computer"}</dd>
+              <dt>Location</dt>
+              <dd class="path dim">{tools.found.ffmpeg}</dd>
             </dl>
           {:else}
-            <p class="dim">Looking…</p>
+            <p class="dim">Not set up yet.</p>
           {/if}
+          <div class="row">
+            <span class="dim">
+              {#if tools.installing}Setting up… {tools.total ? Math.round((tools.received / tools.total) * 100) + "%" : ""}{:else if tools.error}{tools.error}{/if}
+            </span>
+            <button type="button" class="btn" disabled={!inTauri || tools.installing} onclick={installTools}>
+              {tools.found?.managed ? "Update" : tools.found ? "Use Immediate’s own copy" : "Set up now"}
+            </button>
+          </div>
         </section>
       {:else if ui.settingsSection === "shortcuts"}
         <section>

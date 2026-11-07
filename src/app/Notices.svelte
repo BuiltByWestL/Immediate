@@ -3,10 +3,23 @@
   import X from "@lucide/svelte/icons/x";
   import { dismiss, ui } from "../lib/app.svelte";
   import UpdateBar from "./UpdateBar.svelte";
+  import { tools } from "../lib/tools.svelte";
+
+  const pct = $derived(tools.total ? Math.round((tools.received / tools.total) * 100) : 0);
+  const MB = (n: number) => Math.round(n / 1e6);
 </script>
 
 <div class="stack" role="status" aria-live="polite">
   <UpdateBar />
+  {#if tools.installing}
+    <div class="toast pill">
+      <span>
+        {#if tools.phase === "verify"}Checking the download…
+        {:else if tools.phase === "unpack"}Finishing setup…
+        {:else}Setting up video & audio tools{#if tools.total} · <span class="num">{pct}% of {MB(tools.total)} MB</span>{/if}…{/if}
+      </span>
+    </div>
+  {/if}
   {#each ui.toasts as t (t.id)}
     <div class="toast" class:error={t.tone === "error"}>
       <span>{t.text}</span>
@@ -46,6 +59,9 @@
     border-radius: var(--radius);
     box-shadow: 0 4px 16px rgb(0 0 0 / 0.12);
     animation: fade var(--motion) ease-out;
+  }
+  .pill {
+    padding-right: var(--s4);
   }
   .toast.error span {
     color: var(--danger);

@@ -27,6 +27,8 @@ export const ui = $state({
   isSet: false,
   facts: {} as MediaFacts,
   details: null as Details | null,
+  /** ffprobe JSON for video/audio (when media tools are available). */
+  probe: null as any,
   loading: false,
   dialog: null as null | "settings" | "shortcuts",
   settingsSection: "general",
@@ -107,6 +109,14 @@ async function show(path: string): Promise<boolean> {
     ui.file = file;
     ui.facts = {};
     ui.details = null;
+    ui.probe = null;
+    if (file.kind !== "image") {
+      invoke("media_probe", { path: file.path })
+        .then((p) => {
+          if (seq === openSeq) ui.probe = p;
+        })
+        .catch(() => {});
+    }
     getCurrentWindow().setTitle(file.name).catch(() => {});
     invoke<Details>("file_details", { path: file.path })
       .then((d) => {

@@ -9,6 +9,9 @@
   import { canEdit } from "../lib/formats";
   import { beginEdit } from "../modes/image/actions";
   const loadEditBar = () => import("../modes/image/EditBar.svelte");
+  const loadMediaBar = () => import("../modes/media/MediaBar.svelte");
+  import { beginMediaEdit } from "../modes/media/actions";
+  import { media } from "../modes/media/session.svelte";
   import { editor } from "../modes/image/editor.svelte";
 
   const mod = window.__IMMEDIATE__?.platform === "macos" ? "⌘" : "Ctrl+";
@@ -18,6 +21,10 @@
 <header class="toolbar">
   {#if editor.active}
     {#await loadEditBar() then m}
+      <m.default />
+    {/await}
+  {:else if media.active}
+    {#await loadMediaBar() then m}
       <m.default />
     {/await}
   {:else}
@@ -63,7 +70,7 @@
       <Settings size={17} strokeWidth={1.5} />
     </button>
     {#if ui.file && canEdit(ui.file)}
-      <button type="button" class="btn primary edit" title="Edit (E)" onclick={beginEdit}>
+      <button type="button" class="btn primary edit" title="Edit (E)" onclick={() => (ui.file?.kind === "image" ? beginEdit() : beginMediaEdit())}>
         <SlidersHorizontal size={15} strokeWidth={1.75} />Edit
       </button>
     {/if}
