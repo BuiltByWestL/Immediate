@@ -1,0 +1,11 @@
+{
+  "version": "0.1.1",
+  "notes": "Test release used to verify that installed copies update themselves.",
+  "pub_date": "2026-11-07T07:03:09Z",
+  "platforms": {
+    "windows-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR01OM2s2V3g4YmE4bGVPV01wRlpSWjJCQnRjeEJZMVZtSFlPdjdMMHIxRFB6aTRsdnROWFM2U1dEZ21rbm9HeHdUWHdlVEw0NVFvNC8rVDBib1I5REFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDM0OTcwCWZpbGU6SW1tZWRpYXRlXzAuMS4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuMQptRWdBNllZcXdFUENMRXV1TUVTN3Biend2NXBMNkw4SitXQ0ZiMUZxTk50cUp1SG03ZW1PeENlNmpiZjhYTXBBcjJ1TE5mNHd2ekpWZnY5U2ZBTG9EZz09Cg==",
+      "url": "https://api.github.com/repos/BuiltByWestL/Immediate/releases/assets/719921502"
+    }
+  }
+}
