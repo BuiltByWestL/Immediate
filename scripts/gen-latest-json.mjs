@@ -19,13 +19,13 @@ if (!tag) {
   process.exit(2);
 }
 
-const gh = (ghArgs, input) =>
-  execFileSync("gh", ghArgs, { encoding: "utf8", input, stdio: ["pipe", "pipe", "inherit"] });
-const api = (path, { method = "GET", body, raw = false } = {}) => {
+const gh = (ghArgs, input, quiet = false) =>
+  execFileSync("gh", ghArgs, { encoding: "utf8", input, stdio: ["pipe", "pipe", quiet ? "pipe" : "inherit"] });
+const api = (path, { method = "GET", body, raw = false, quiet = false } = {}) => {
   const a = ["api", "-X", method, path];
   if (raw) a.push("-H", "Accept: application/octet-stream");
   if (body) a.push("--input", "-");
-  const out = gh(a, body ? JSON.stringify(body) : undefined);
+  const out = gh(a, body ? JSON.stringify(body) : undefined, quiet);
   return raw ? out : JSON.parse(out || "null");
 };
 
@@ -76,7 +76,7 @@ if (dryRun) {
 // Commit latest.json as the only file on the `updates` branch (Git Data API, no checkout).
 let parent = null;
 try {
-  parent = api(`repos/${REPO}/git/ref/heads/updates`).object.sha;
+  parent = api(`repos/${REPO}/git/ref/heads/updates`, { quiet: true }).object.sha;
 } catch {
   /* branch does not exist yet */
 }

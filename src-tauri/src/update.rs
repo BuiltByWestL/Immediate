@@ -96,16 +96,15 @@ pub fn run_test_hook<R: Runtime>(app: &AppHandle<R>) {
             Ok(None) => write(format!("up-to-date {}", app.package_info().version)),
             Ok(Some(u)) if mode == "install" => {
                 write(format!("installing {} -> {}", u.current_version, u.version));
+                // On Windows this hands over to the installer, which relaunches the app;
+                // the relaunched copy inherits this hook and reports "up-to-date <new version>".
                 if let Err(e) = u.download_and_install(|_, _| {}, || {}).await {
                     write(format!("install-error {e}"));
                 }
-                app.exit(0);
             }
             Ok(Some(u)) => write(format!("available {} -> {}", u.current_version, u.version)),
             Err(e) => write(format!("check-error {e}")),
         }
-        if mode != "install" {
-            app.exit(0);
-        }
+        app.exit(0);
     });
 }
