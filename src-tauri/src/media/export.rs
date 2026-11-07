@@ -82,14 +82,26 @@ fn run_with_progress<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[Stri
     if CANCELLED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("cancelled".into());
     }
+    run_ffmpeg(app, ffmpeg, args, total, base, share, "export", true)
+}
+
+/// Runs ffmpeg with `-progress`, emitting `event` with {progress, eta}. Only a `cancellable` run
+/// can be stopped with media_cancel (a background preview never is).
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn run_ffmpeg<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[String], total: f64, base: f64, share: f64, event: &str, cancellable: bool) -> Result<(), String> {
     let mut cmd = crate::tools::quiet_command(ffmpeg);
     cmd.args(["-hide_banner", "-nostats", "-progress", "pipe:1", "-y"]).args(args);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
     let mut child = cmd.spawn().map_err(|e| e.to_string())?;
     let stdout = child.stdout.take().ok_or("no output")?;
     let stderr = child.stderr.take().ok_or("no output")?;
-    if let Ok(mut c) = CHILD.lock() {
-        *c = Some(child);
+    let mut own: Option<Child> = None;
+    if cancellable {
+        if let Ok(mut c) = CHILD.lock() {
+            *c = Some(child);
+        }
+    } else {
+        own = Some(child);
     }
     // Keep the last lines of ffmpeg's messages for a useful error.
     let err_thread = std::thread::spawn(move || {
@@ -109,12 +121,15 @@ fn run_with_progress<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[Stri
             let p = base + done * share;
             let elapsed = started.elapsed().as_secs_f64();
             let eta = (done > 0.02).then(|| elapsed / done * (1.0 - done) + (1.0 - base - share) * elapsed / done.max(0.02));
-            let _ = app.emit("export", Progress { progress: p, eta });
+            let _ = app.emit(event, Progress { progress: p, eta });
         }
     }
-    let status = CHILD.lock().ok().and_then(|mut c| c.take()).map(|mut c| c.wait());
+    let status = match own.as_mut() {
+        Some(c) => Some(c.wait()),
+        None => CHILD.lock().ok().and_then(|mut c| c.take()).map(|mut c| c.wait()),
+    };
     let tail = err_thread.join().unwrap_or_default();
-    if CANCELLED.load(std::sync::atomic::Ordering::SeqCst) {
+    if cancellable && CANCELLED.load(std::sync::atomic::Ordering::SeqCst) {
         return Err("cancelled".into());
     }
     match status {
@@ -313,8 +328,20 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 } else {
                     vec![]
                 };
+                // Each part starts on a keyframe (the UI sends keyframe-aligned starts). Seeking
+                // before the input backs up to an earlier keyframe, so: a coarse seek there for
+                // speed, then an exact one after the input that lands on the keyframe itself.
                 let one = |seg: &Segment, out: &Path, base: f64, share: f64| -> Result<(), String> {
-                    let mut a: Vec<String> = vec!["-ss".into(), fmt_t(seg.start), "-to".into(), fmt_t(seg.end), "-i".into(), req.source.clone()];
+                    let coarse = (seg.start - 10.0).max(0.0);
+                    let mut a: Vec<String> = Vec::new();
+                    if coarse > 0.0 {
+                        a.extend(["-ss".into(), fmt_t(coarse)]);
+                    }
+                    a.extend(["-i".into(), req.source.clone()]);
+                    if seg.start - coarse > 0.0005 {
+                        a.extend(["-ss".into(), fmt_t(seg.start - coarse - 0.0005)]);
+                    }
+                    a.extend(["-to".into(), fmt_t(seg.end - coarse)]);
                     a.extend(["-map".into(), "0".into(), "-c".into(), "copy".into(), "-ignore_unknown".into()]);
                     a.extend(audio_args.iter().cloned());
                     a.extend(["-avoid_negative_ts".into(), "make_zero".into()]);
@@ -388,6 +415,10 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     let target_bits = req.size_mb.unwrap_or(10.0) * 8.0 * 1_000_000.0 * 0.94;
                     let audio_bps = if na > 0 { 96_000.0 * na as f64 } else { 0.0 };
                     let mut vbps = (target_bits / total - audio_bps).max(80_000.0);
+                    // Never bigger than it was: a short clip that already fits keeps its bitrate.
+                    if let Some(src) = video.and_then(|v| num(&v["bit_rate"])).or_else(|| num(&req.probe["format"]["bit_rate"])) {
+                        vbps = vbps.min(src);
+                    }
                     if nv == 1 {
                         // Fewer pixels when the bitrate is too low for the full size.
                         let (w, h) = (video.and_then(|v| v["width"].as_f64()).unwrap_or(1920.0), video.and_then(|v| v["height"].as_f64()).unwrap_or(1080.0));

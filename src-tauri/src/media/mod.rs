@@ -167,6 +167,40 @@ fn peaks(samples: &[i16], buckets: usize) -> Vec<f32> {
         .collect()
 }
 
+/// A playable stand-in for files the built-in player can't decode (ProRes, MPEG-2, AVI, AC-3…):
+/// H.264/AAC MP4 at up to 720p, made once and kept in the temp folder. Edits still apply to the
+/// original. Progress arrives as "proxy" events.
+#[tauri::command]
+pub async fn media_proxy<R: Runtime>(app: AppHandle<R>, path: String, duration: f64, video: bool) -> Result<String, String> {
+    use std::hash::{Hash, Hasher};
+    use tauri::Manager;
+    let t = tools(&app)?;
+    let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    (&path, meta.len(), meta.modified().ok()).hash(&mut h);
+    let dir = crate::files::temp_dir().join("previews");
+    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    let out = dir.join(format!("{:016x}.{}", h.finish(), if video { "mp4" } else { "m4a" }));
+    if !out.is_file() {
+        let tmp = out.with_extension("part.mp4");
+        let mut a: Vec<String> = vec!["-i".into(), path.clone()];
+        if video {
+            a.extend(["-map", "0:v:0", "-map", "0:a:0?", "-c:v", "libx264", "-preset", "veryfast", "-crf", "24", "-pix_fmt", "yuv420p"].map(String::from));
+            a.extend(["-vf".into(), "scale=-2:'min(720,ih)'".into()]);
+        } else {
+            a.extend(["-map", "0:a:0", "-vn"].map(String::from));
+        }
+        a.extend(["-c:a", "aac", "-b:a", "160k", "-movflags", "+faststart", "-f", "mp4"].map(String::from));
+        a.push(tmp.to_string_lossy().into_owned());
+        let handle = app.clone();
+        let ffmpeg = t.ffmpeg.clone();
+        blocking(move || export::run_ffmpeg(&handle, &ffmpeg, &a, duration.max(0.1), 0.0, 1.0, "proxy", false)).await?;
+        std::fs::rename(&tmp, &out).map_err(|e| e.to_string())?;
+    }
+    let _ = app.asset_protocol_scope().allow_file(&out);
+    Ok(out.to_string_lossy().into_owned())
+}
+
 /// One frame as a small JPEG (timeline thumbnails, frame grab previews).
 #[tauri::command]
 pub async fn media_frame<R: Runtime>(app: AppHandle<R>, path: String, time: f64, height: u32) -> Result<tauri::ipc::Response, String> {

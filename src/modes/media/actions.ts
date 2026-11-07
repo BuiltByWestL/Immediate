@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ask, openPaths, toast, ui } from "../../lib/app.svelte";
 import { ensureTools } from "../../lib/tools.svelte";
-import { keptSegments, media, mediaChanged, startMediaEdit, stopMediaEdit } from "./session.svelte";
+import { keptSegments, media, mediaChanged, snappedSegments, startMediaEdit, stopMediaEdit } from "./session.svelte";
 
 export async function beginMediaEdit() {
   const file = ui.file;
@@ -50,13 +50,15 @@ function extOf(p: string) {
 export async function saveMedia(target: "copy" | "as" | "replace") {
   const file = ui.file;
   if (!file || media.saving) return;
-  const segments = keptSegments();
-  if (!segments.length) {
+  const kept = keptSegments();
+  if (!kept.length) {
     toast("Nothing is left to save: every part was cut out.", "error");
     return;
   }
   const hasVideo = (media.probe?.streams ?? []).some((s: any) => s.codec_type === "video" && s.disposition?.attached_pic !== 1);
   const outExt = media.mode === "smaller" ? (hasVideo ? "mp4" : "m4a") : file.ext;
+  // Lossless parts start on keyframes, exactly as the timeline shows.
+  const segments = media.mode === "lossless" && hasVideo ? snappedSegments(kept, media.keyframes) : kept;
   let dest: string | null = null;
   if (file.temporary && target !== "as") target = "as";
   if (target === "as") {

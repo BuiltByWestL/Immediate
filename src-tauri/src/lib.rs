@@ -134,6 +134,7 @@ pub fn run() {
             media::media_keyframes,
             media::media_waveform,
             media::media_frame,
+            media::media_proxy,
             media::install::tools_install,
             media::export::media_export,
             media::export::media_cancel,

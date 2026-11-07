@@ -6,6 +6,7 @@
   import Play from "@lucide/svelte/icons/play";
   import { onMount } from "svelte";
   import { viewer } from "../../lib/app.svelte";
+  import { needsPreview, preview, previewUrl } from "../../lib/preview.svelte";
   import type { OpenedFile } from "../../lib/types";
   import MediaPanel from "./MediaPanel.svelte";
   import { mediaKeys } from "./keys";
@@ -26,7 +27,25 @@
   let stills = $state(false);
   let still = $state<string | null>(null);
 
-  const src = $derived(convertFileSrc(file.path));
+  /** A playable stand-in for formats the built-in player can't decode. */
+  let proxied = $state<string | null>(null);
+  let preparing = $state(false);
+  const src = $derived(proxied ?? convertFileSrc(file.path));
+
+  async function usePreview() {
+    if (preparing || proxied) return;
+    preparing = true;
+    stills = true;
+    showStill(media.time);
+    try {
+      proxied = await previewUrl(file, media.probe);
+      stills = false;
+    } catch {
+      /* stay on still frames: editing still works */
+    } finally {
+      preparing = false;
+    }
+  }
   const kept = $derived(keptSegments());
 
   // Follow playback, skipping the parts that are cut out.
@@ -79,6 +98,7 @@
   onMount(() => {
     raf = requestAnimationFrame(tick);
     viewer.media = null;
+    if (needsPreview(file, media.probe)) usePreview();
     // Keyboard: J/K/L, frame steps, I/O to trim, Delete to cut out.
     mediaKeys.handler = (e: KeyboardEvent) => {
       const k = e.key;
@@ -105,8 +125,11 @@
   });
 
   function onerror() {
-    stills = true;
-    showStill(media.time);
+    if (!proxied) usePreview();
+    else {
+      stills = true;
+      showStill(media.time);
+    }
   }
   function onloadedmetadata() {
     if (el instanceof HTMLVideoElement && el.videoWidth === 0 && isVideo) onerror();
@@ -136,7 +159,10 @@
         ></video>
       {:else if isVideo && stills}
         {#if still}<img src={still} alt="" />{/if}
-        <p class="note">This video’s format can’t play inside Immediate yet. You can still trim and cut it: the picture follows where you click.</p>
+        <p class="note">
+          {#if preparing}Getting this video ready to play… <span class="num">{Math.round(preview.progress * 100)}%</span> You can trim and cut already.
+          {:else}This video can’t play inside Immediate. You can still trim and cut it: the picture follows where you click.{/if}
+        </p>
       {:else}
         <div class="audio-art" aria-hidden="true"><AudioLines size={40} strokeWidth={1.25} /></div>
         <audio
@@ -147,7 +173,7 @@
           onplay={() => (media.playing = true)}
           onpause={() => (media.playing = false)}
           {onloadedmetadata}
-          onerror={() => (stills = true)}
+          onerror={() => (proxied ? (stills = true) : usePreview())}
         ></audio>
       {/if}
     </div>

@@ -15,7 +15,7 @@
 
   const NOUN = { image: "pictures", video: "videos", audio: "audio files" };
   const unsupported = $derived(
-    canPreview(file) ? null : `Immediate can’t show .${file.ext.toUpperCase()} ${NOUN[file.kind]} yet.`,
+    file.kind !== "image" || canPreview(file) ? null : `Immediate can’t show .${file.ext.toUpperCase()} ${NOUN[file.kind]} yet.`,
   );
 </script>
 
