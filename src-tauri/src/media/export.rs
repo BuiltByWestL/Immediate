@@ -43,6 +43,14 @@ pub struct ExportRequest {
     /// Even out loudness (EBU R128, -16 LUFS: a common level for speech and music online).
     #[serde(default)]
     normalize: bool,
+    /// Tone in dB: bass (100 Hz shelf), mid (1 kHz), treble (8 kHz shelf).
+    #[serde(default)]
+    eq: [f64; 3],
+    #[serde(default)]
+    denoise: bool,
+    /// Gentle compressor that evens out loud and quiet parts.
+    #[serde(default)]
+    compress: bool,
     /// "copy" | "replace" | "path"
     target: String,
     dest: Option<String>,
@@ -266,6 +274,27 @@ fn audio_settings(s: &Value, out_index: usize) -> Vec<String> {
     a
 }
 
+/// Encoder settings for saving audio as another format, chosen by file extension.
+fn audio_for_ext(ext: &str, s: &Value, i: usize) -> Vec<String> {
+    let codec_name = s["codec_name"].as_str().unwrap_or_default();
+    let deep = codec_name.contains("24") || codec_name.contains("32") || s["bits_per_raw_sample"].as_str() == Some("24");
+    let (codec, rate): (&str, Option<&str>) = match ext {
+        "mp3" => ("libmp3lame", Some("192k")),
+        "m4a" | "aac" | "m4b" => ("aac", Some("192k")),
+        "opus" => ("libopus", Some("128k")),
+        "ogg" | "oga" => ("libvorbis", Some("192k")),
+        "flac" => ("flac", None),
+        "wav" | "bwf" => (if deep { "pcm_s24le" } else { "pcm_s16le" }, None),
+        "aif" | "aiff" => (if deep { "pcm_s24be" } else { "pcm_s16be" }, None),
+        _ => ("aac", Some("192k")),
+    };
+    let mut a = vec![format!("-c:a:{i}"), codec.into()];
+    if let Some(r) = rate {
+        a.extend([format!("-b:a:{i}"), r.into()]);
+    }
+    a
+}
+
 fn destination(req: &ExportRequest, ext: &str) -> Result<PathBuf, String> {
     let source = PathBuf::from(&req.source);
     match req.target.as_str() {
@@ -305,8 +334,13 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
 
     // Fades and loudness change the sound over the whole result, so they need the frame-exact
     // path (for audio files that costs nothing extra: audio is re-encoded either way).
-    let shaping = !req.mute && !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize);
+    let tone = req.eq.iter().any(|g| g.abs() > 0.05) || req.denoise || req.compress;
+    let shaping = !req.mute && !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || tone);
+    // Save As with another audio extension converts (audio files only).
+    let dest_ext = (req.target == "path").then(|| req.dest.as_deref().map(|d| ext_of(Path::new(d)))).flatten();
+    let convert_to = dest_ext.clone().filter(|e| *e != src_ext && !has_video);
     let (ext, mode) = match req.mode.as_str() {
+        _ if convert_to.is_some() && req.mode != "smaller" => (convert_to.clone().unwrap(), "accurate"),
         "smaller" => (if has_video { "mp4".to_owned() } else { "m4a".to_owned() }, "smaller"),
         _ if shaping => (src_ext.clone(), "accurate"),
         // Changing the volume needs the audio re-encoded; the video can still be copied.
@@ -414,6 +448,22 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 if req.gain_db.abs() > 0.01 {
                     chain.push(format!("volume={:.2}dB", req.gain_db));
                 }
+                if req.denoise {
+                    chain.push("afftdn=nf=-25".into());
+                }
+                let [bass, mid, treble] = req.eq;
+                if bass.abs() > 0.05 {
+                    chain.push(format!("bass=g={bass:.1}:f=100"));
+                }
+                if mid.abs() > 0.05 {
+                    chain.push(format!("equalizer=f=1000:t=q:w=1:g={mid:.1}"));
+                }
+                if treble.abs() > 0.05 {
+                    chain.push(format!("treble=g={treble:.1}:f=8000"));
+                }
+                if req.compress {
+                    chain.push("acompressor=threshold=-20dB:ratio=3:attack=15:release=250:makeup=2".into());
+                }
                 if req.normalize {
                     chain.push("loudnorm=I=-16:TP=-1.5:LRA=11".into());
                 }
@@ -426,8 +476,14 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 }
                 if !chain.is_empty() {
                     for k in 0..na {
+                        let mut c = chain.join(",");
+                        // loudnorm works at 192 kHz internally; return to the track's own rate.
+                        if req.normalize {
+                            let sr = keep_audio[k]["sample_rate"].as_str().unwrap_or("48000");
+                            c.push_str(&format!(",aresample={sr}"));
+                        }
                         fc = fc.replacen(&format!("[aout{k}]"), &format!("[aout{k}pre]"), 1);
-                        fc.push_str(&format!(";[aout{k}pre]{}[aout{k}]", chain.join(",")));
+                        fc.push_str(&format!(";[aout{k}pre]{c}[aout{k}]"));
                     }
                 }
                 let mut a: Vec<String> = vec!["-i".into(), req.source.clone(), "-filter_complex".into(), fc];
@@ -468,7 +524,10 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                         a.extend(video_settings(v, &req.probe, 0));
                     }
                     for (k, s) in keep_audio.iter().enumerate() {
-                        a.extend(audio_settings(s, k));
+                        match &convert_to {
+                            Some(e) => a.extend(audio_for_ext(e, s, k)),
+                            None => a.extend(audio_settings(s, k)),
+                        }
                     }
                 }
                 a.extend(movflags.iter().cloned());

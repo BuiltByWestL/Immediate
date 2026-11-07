@@ -16,6 +16,10 @@ export interface MediaEdit {
   fadeIn: number;
   fadeOut: number;
   normalize: boolean;
+  /** Bass, mid, treble in dB. */
+  eq: [number, number, number];
+  denoise: boolean;
+  compress: boolean;
 }
 
 export type ExportMode = "lossless" | "accurate" | "smaller";
@@ -26,7 +30,7 @@ export const media = $state({
   probe: null as any,
   duration: 0,
   keyframes: [] as number[],
-  edit: { trim: { start: 0, end: 0 }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false } as MediaEdit,
+  edit: { trim: { start: 0, end: 0 }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false, eq: [0, 0, 0], denoise: false, compress: false } as MediaEdit,
   past: [] as MediaEdit[],
   future: [] as MediaEdit[],
   /** Current play position, source seconds. */
@@ -48,7 +52,7 @@ let committed = "";
 export function startMediaEdit(probe: any, duration: number) {
   media.probe = probe;
   media.duration = duration;
-  media.edit = { trim: { start: 0, end: duration }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false };
+  media.edit = { trim: { start: 0, end: duration }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false, eq: [0, 0, 0], denoise: false, compress: false };
   media.past = [];
   media.future = [];
   media.selection = null;
@@ -97,7 +101,7 @@ export function redoMedia() {
 
 export function mediaChanged(): boolean {
   const e = media.edit;
-  return media.active && (e.trim.start > 0.001 || e.trim.end < media.duration - 0.001 || e.cuts.length > 0 || e.mute || Math.abs(e.gain) > 0.01 || e.fadeIn > 0 || e.fadeOut > 0 || e.normalize);
+  return media.active && (e.trim.start > 0.001 || e.trim.end < media.duration - 0.001 || e.cuts.length > 0 || e.mute || Math.abs(e.gain) > 0.01 || e.fadeIn > 0 || e.fadeOut > 0 || e.normalize || e.eq.some((g) => g !== 0) || e.denoise || e.compress);
 }
 
 /** Merged, sorted cut ranges inside the trim. */

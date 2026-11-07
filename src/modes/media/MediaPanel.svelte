@@ -40,6 +40,9 @@
       e.fadeIn = 0;
       e.fadeOut = 0;
       e.normalize = false;
+      e.eq = [0, 0, 0];
+      e.denoise = false;
+      e.compress = false;
     });
   }
 
@@ -117,7 +120,21 @@
               <span>Even out loudness</span>
               <button type="button" class="switch" role="switch" aria-checked={media.edit.normalize} aria-label="Even out loudness" onclick={() => changeMedia((e) => (e.normalize = !e.normalize))}></button>
             </div>
-            {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize)}
+            {#if advanced}
+              <h3 class="sub">Tone</h3>
+              <Slider label="Bass" min={-12} max={12} bind:value={media.edit.eq[0]} oncommit={commitMedia} />
+              <Slider label="Mid" min={-12} max={12} bind:value={media.edit.eq[1]} oncommit={commitMedia} />
+              <Slider label="Treble" min={-12} max={12} bind:value={media.edit.eq[2]} oncommit={commitMedia} />
+              <div class="toggle">
+                <span>Reduce background noise</span>
+                <button type="button" class="switch" role="switch" aria-checked={media.edit.denoise} aria-label="Reduce background noise" onclick={() => changeMedia((e) => (e.denoise = !e.denoise))}></button>
+              </div>
+              <div class="toggle">
+                <span>Level out loud and quiet parts</span>
+                <button type="button" class="switch" role="switch" aria-checked={media.edit.compress} aria-label="Level out loud and quiet parts" onclick={() => changeMedia((e) => (e.compress = !e.compress))}></button>
+              </div>
+            {/if}
+            {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize || media.edit.eq.some((g) => g) || media.edit.denoise || media.edit.compress)}
               <p class="hint">Fades and loudness re-encode the video too, so saving takes longer.</p>
             {/if}
           {/if}
@@ -224,6 +241,11 @@
     justify-content: space-between;
     min-height: 28px;
     margin-bottom: var(--s1);
+  }
+  .sub {
+    margin-top: var(--s3);
+    font-size: var(--text-sm);
+    color: var(--text-dim);
   }
   .fades {
     display: flex;

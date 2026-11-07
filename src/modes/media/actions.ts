@@ -63,9 +63,15 @@ export async function saveMedia(target: "copy" | "as" | "replace") {
   if (file.temporary && target !== "as") target = "as";
   if (target === "as") {
     const base = file.path.slice(0, file.path.length - file.ext.length - 1);
-    dest = await saveDialog({ defaultPath: `${base}${ui.settings.saveSuffix}.${outExt}`, filters: [{ name: outExt.toUpperCase(), extensions: [outExt] }] });
+    // Audio can be saved as another format by picking it here.
+    const audioFormats = hasVideo || media.mode === "smaller" ? [] : ["wav", "flac", "mp3", "m4a", "opus"].filter((x) => x !== outExt);
+    const choices = [outExt, ...audioFormats];
+    dest = await saveDialog({
+      defaultPath: `${base}${ui.settings.saveSuffix}.${outExt}`,
+      filters: choices.map((x) => ({ name: x.toUpperCase(), extensions: [x] })),
+    });
     if (!dest) return;
-    if (extOf(dest) !== outExt) dest = `${dest}.${outExt}`;
+    if (!choices.includes(extOf(dest))) dest = `${dest}.${outExt}`;
   }
   if (target === "replace") {
     if (outExt !== file.ext) {
@@ -99,6 +105,9 @@ export async function saveMedia(target: "copy" | "as" | "replace") {
         fadeIn: media.edit.fadeIn,
         fadeOut: media.edit.fadeOut,
         normalize: media.edit.normalize,
+        eq: media.edit.eq,
+        denoise: media.edit.denoise,
+        compress: media.edit.compress,
         target: target === "as" ? "path" : target,
         dest,
         suffix: ui.settings.saveSuffix,

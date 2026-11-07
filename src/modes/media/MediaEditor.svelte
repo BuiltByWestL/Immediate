@@ -124,6 +124,52 @@
     };
   });
 
+  // Live sound: volume and tone are heard while playing, through Web Audio filters that match
+  // the ones used when saving (fades, loudness and noise reduction apply on save only).
+  let audio: { ctx: AudioContext; gain: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode } | null = null;
+  function connectAudio() {
+    if (!el || audio) return;
+    try {
+      const ctx = new AudioContext();
+      const src = ctx.createMediaElementSource(el);
+      const gain = ctx.createGain();
+      const mk = (type: BiquadFilterType, f: number) => {
+        const b = ctx.createBiquadFilter();
+        b.type = type;
+        b.frequency.value = f;
+        b.Q.value = 1;
+        return b;
+      };
+      const eq = [mk("lowshelf", 100), mk("peaking", 1000), mk("highshelf", 8000)];
+      const comp = ctx.createDynamicsCompressor();
+      comp.threshold.value = -20;
+      comp.ratio.value = 3;
+      comp.attack.value = 0.015;
+      comp.release.value = 0.25;
+      src.connect(gain).connect(eq[0]).connect(eq[1]).connect(eq[2]);
+      audio = { ctx, gain, eq, comp, out: eq[2] };
+      routeCompressor();
+    } catch {
+      /* plays without live effects */
+    }
+  }
+  function routeCompressor() {
+    if (!audio) return;
+    audio.out.disconnect();
+    audio.comp.disconnect();
+    if (media.edit.compress) audio.out.connect(audio.comp).connect(audio.ctx.destination);
+    else audio.out.connect(audio.ctx.destination);
+  }
+  $effect(() => {
+    const e = media.edit;
+    if (!audio) return;
+    audio.gain.gain.value = Math.pow(10, e.gain / 20);
+    e.eq.forEach((g, i) => (audio!.eq[i].gain.value = g));
+    void e.compress;
+    routeCompressor();
+  });
+  $effect(() => () => audio?.ctx.close());
+
   function onerror() {
     if (!proxied) usePreview();
     else {
@@ -151,7 +197,12 @@
           {src}
           preload="auto"
           muted={media.edit.mute}
-          onplay={() => (media.playing = true)}
+          crossorigin="anonymous"
+          onplay={() => {
+            media.playing = true;
+            connectAudio();
+            audio?.ctx.resume();
+          }}
           onpause={() => (media.playing = false)}
           {onloadedmetadata}
           {onerror}
@@ -170,7 +221,12 @@
           {src}
           preload="auto"
           muted={media.edit.mute}
-          onplay={() => (media.playing = true)}
+          crossorigin="anonymous"
+          onplay={() => {
+            media.playing = true;
+            connectAudio();
+            audio?.ctx.resume();
+          }}
           onpause={() => (media.playing = false)}
           {onloadedmetadata}
           onerror={() => (proxied ? (stills = true) : usePreview())}
