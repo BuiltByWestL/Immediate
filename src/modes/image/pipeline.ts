@@ -2,8 +2,11 @@
 // straighten, perspective) and every adjustment. The same code draws the live preview and
 // renders the full-resolution export, so what you see is what you save.
 
-import type { Adjust, Edits, Geometry } from "./edits";
+import type { Adjust, Edits } from "./edits";
 import { effectiveAdjust } from "./edits";
+import { effectiveCrop, outputSize, rotatedSize, type Rect, type Size } from "./geometry";
+
+export { outputSize };
 
 const VERT = `#version 300 es
 in vec2 aPos;
@@ -66,7 +69,7 @@ void main() {
   vec2 outPx = (frag - uViewOffset) / uViewScale;
   if (any(lessThan(outPx, vec2(0.0))) || any(greaterThanEqual(outPx, uOutSize))) { outColor = vec4(0.0); return; }
   vec2 uv = sourceUV(outPx);
-  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { outColor = vec4(0.0, 0.0, 0.0, 1.0); return; }
+  if (any(lessThan(uv, vec2(0.0))) || any(greaterThan(uv, vec2(1.0)))) { outColor = vec4(0.0); return; }
 
   float exposure = uA[0] * 0.02, brilliance = uA[1] * 0.01, highlights = uA[2] * 0.01, shadows = uA[3] * 0.01;
   float contrast = uA[4] * 0.01, brightness = uA[5] * 0.01, blackPoint = uA[6] * 0.01;
@@ -164,17 +167,6 @@ export interface View {
   y: number;
 }
 
-export interface Size {
-  w: number;
-  h: number;
-}
-
-/** Output size of the edited photo (after rotation and crop), in pixels. */
-export function outputSize(src: Size, g: Geometry): Size {
-  const rot = g.quarter % 2 ? { w: src.h, h: src.w } : src;
-  return { w: Math.max(1, Math.round(rot.w * g.crop.w)), h: Math.max(1, Math.round(rot.h * g.crop.h)) };
-}
-
 export class Pipeline {
   readonly gl: WebGL2RenderingContext;
   private prog: WebGLProgram;
@@ -237,11 +229,13 @@ export class Pipeline {
     this.src = size;
   }
 
-  private setUniforms(edits: Edits, target: Size, view: View, neutral: boolean) {
+  private setUniforms(edits: Edits, target: Size, view: View, neutral: boolean, area?: Rect) {
     const gl = this.gl;
     const g = edits.geometry;
-    const out = outputSize(this.src, g);
-    const rot = g.quarter % 2 ? { w: this.src.h, h: this.src.w } : this.src;
+    const rot = rotatedSize(this.src, g);
+    // `area` replaces the crop (the crop tool shows the whole straightened photo).
+    const crop = area ?? effectiveCrop(g, this.src);
+    const out = area ? { w: rot.w * area.w, h: rot.h * area.h } : outputSize(this.src, g);
     const a = neutral ? null : effectiveAdjust(edits);
     gl.uniform1i(this.loc.uSrc, 0);
     gl.uniform2f(this.loc.uSrcSize, this.src.w, this.src.h);
@@ -250,7 +244,7 @@ export class Pipeline {
     gl.uniform2f(this.loc.uViewOffset, view.x, view.y);
     gl.uniform1f(this.loc.uViewScale, view.scale);
     gl.uniform2f(this.loc.uOutSize, out.w, out.h);
-    gl.uniform4f(this.loc.uCrop, g.crop.x, g.crop.y, g.crop.w, g.crop.h);
+    gl.uniform4f(this.loc.uCrop, crop.x, crop.y, crop.w, crop.h);
     gl.uniform2f(this.loc.uRotSize, rot.w, rot.h);
     gl.uniform1f(this.loc.uAngle, (g.angle * Math.PI) / 180);
     gl.uniform1i(this.loc.uQuarter, g.quarter % 4);
@@ -260,7 +254,7 @@ export class Pipeline {
   }
 
   /** Draws into the canvas. `neutral` shows the original (hold to compare), keeping geometry. */
-  render(edits: Edits, view: View, neutral = false) {
+  render(edits: Edits, view: View, neutral = false, area?: Rect) {
     const gl = this.gl;
     if (!this.tex) return;
     const target = { w: gl.drawingBufferWidth, h: gl.drawingBufferHeight };
@@ -270,7 +264,7 @@ export class Pipeline {
     gl.clear(gl.COLOR_BUFFER_BIT);
     gl.activeTexture(gl.TEXTURE0);
     gl.bindTexture(gl.TEXTURE_2D, this.tex);
-    this.setUniforms(edits, target, view, neutral);
+    this.setUniforms(edits, target, view, neutral, area);
     gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
   }
 

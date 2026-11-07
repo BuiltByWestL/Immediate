@@ -3,12 +3,14 @@
   import { ui, updateSettings } from "../../lib/app.svelte";
   import { autoEnhance, hiddenEditCount, SECTIONS } from "./edits";
   import { change, commit, editor, session, type Tab } from "./editor.svelte";
+  import CropPanel from "./CropPanel.svelte";
   import FiltersPanel from "./FiltersPanel.svelte";
   import Slider from "./Slider.svelte";
 
   const TABS: [Tab, string][] = [
     ["adjust", "Adjust"],
     ["filters", "Filters"],
+    ["crop", "Crop"],
   ];
 
   const advanced = $derived(ui.settings.mode === "advanced");
@@ -71,6 +73,8 @@
       {/each}
     {:else if editor.tab === "filters"}
       <FiltersPanel />
+    {:else if editor.tab === "crop"}
+      <CropPanel />
     {/if}
   </div>
 </aside>

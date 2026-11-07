@@ -5,6 +5,8 @@
   import { viewer } from "../../lib/app.svelte";
   import type { OpenedFile } from "../../lib/types";
   import { editor, session } from "./editor.svelte";
+  import CropOverlay from "./CropOverlay.svelte";
+  import { cropViewBox, rotatedSize } from "./geometry";
   import Inspector from "./Inspector.svelte";
   import { outputSize, Pipeline } from "./pipeline";
   import type { ImageInfo } from "./save";
@@ -13,7 +15,7 @@
 
   let box: HTMLDivElement;
   let canvas: HTMLCanvasElement;
-  let pipeline: Pipeline | null = null;
+  let pipeline = $state.raw<Pipeline | null>(null);
   let bw = $state(0);
   let bh = $state(0);
   let dpr = window.devicePixelRatio || 1;
@@ -50,10 +52,16 @@
     ty = h <= bh ? (bh - h) / 2 : Math.min(0, Math.max(bh - h, ty));
   }
 
+  // The crop tool shows the whole photo; elsewhere the cropped result.
+  const cropping = $derived(editor.tab === "crop");
+
   // Output size follows crop/rotation; refit when it changes.
   $effect(() => {
     if (!editor.ready || !pipeline) return;
-    const o = outputSize(pipeline.src, editor.edits.geometry);
+    const g = editor.edits.geometry;
+    const rot = rotatedSize(pipeline.src, g);
+    const area = cropViewBox(g, pipeline.src);
+    const o = cropping ? { w: Math.round(rot.w * area.w), h: Math.round(rot.h * area.h) } : outputSize(pipeline.src, g);
     if (o.w !== out.w || o.h !== out.h) {
       out = o;
       fit();
@@ -63,7 +71,7 @@
   // Draw whenever anything that affects the picture changes, at most once per frame.
   let frame = 0;
   $effect(() => {
-    const key = JSON.stringify(editor.edits) + editor.comparing + scale + tx + ty + bw + bh + editor.ready;
+    const key = JSON.stringify(editor.edits) + editor.comparing + scale + tx + ty + bw + bh + editor.ready + cropping;
     void key;
     cancelAnimationFrame(frame);
     frame = requestAnimationFrame(draw);
@@ -77,7 +85,8 @@
       canvas.width = w;
       canvas.height = h;
     }
-    pipeline.render(editor.edits, { scale: scale * dpr, x: tx * dpr, y: ty * dpr }, editor.comparing);
+    const area = cropping ? cropViewBox(editor.edits.geometry, pipeline.src) : undefined;
+    pipeline.render(editor.edits, { scale: scale * dpr, x: tx * dpr, y: ty * dpr }, editor.comparing, area);
   }
 
   async function load() {
@@ -182,6 +191,9 @@
     ondblclick={() => (fitted ? zoomTo(1) : fit())}
   >
     <canvas bind:this={canvas} style:width="{bw}px" style:height="{bh}px"></canvas>
+    {#if cropping && editor.ready && pipeline}
+      <CropOverlay {scale} {tx} {ty} src={pipeline.src} area={cropViewBox(editor.edits.geometry, pipeline.src)} />
+    {/if}
     {#if editor.comparing}
       <span class="badge">Original</span>
     {/if}
