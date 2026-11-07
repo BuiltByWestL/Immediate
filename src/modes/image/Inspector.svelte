@@ -5,12 +5,14 @@
   import { change, commit, editor, session, type Tab } from "./editor.svelte";
   import CropPanel from "./CropPanel.svelte";
   import FiltersPanel from "./FiltersPanel.svelte";
+  import MarkupPanel from "./MarkupPanel.svelte";
   import Slider from "./Slider.svelte";
 
   const TABS: [Tab, string][] = [
     ["adjust", "Adjust"],
     ["filters", "Filters"],
     ["crop", "Crop"],
+    ["markup", "Markup"],
   ];
 
   const advanced = $derived(ui.settings.mode === "advanced");
@@ -75,6 +77,8 @@
       <FiltersPanel />
     {:else if editor.tab === "crop"}
       <CropPanel />
+    {:else}
+      <MarkupPanel />
     {/if}
   </div>
 </aside>
@@ -95,6 +99,7 @@
   }
   .tabs button {
     flex: 1;
+    padding: 0 var(--s1);
   }
   .body {
     flex: 1;

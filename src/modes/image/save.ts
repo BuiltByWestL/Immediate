@@ -3,6 +3,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import type { Edits } from "./edits";
+import { mapper } from "./geometry";
+import { paintMarkup } from "./markup";
 import type { Pipeline } from "./pipeline";
 
 export interface ImageInfo {
@@ -60,7 +62,9 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
 
   // Let the "Saving…" state paint before the (blocking) full-size render.
   await new Promise((res) => requestAnimationFrame(() => setTimeout(res)));
-  const { data, w, h } = pipeline.renderFull(edits);
+  const rendered = pipeline.renderFull(edits);
+  const { w, h } = rendered;
+  const data = edits.markup.length ? withMarkup(rendered.data, w, h, edits, pipeline) : rendered.data;
   const options = {
     source: r.path,
     width: w,
@@ -77,4 +81,15 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
     keepIcc: r.info.colorSpace !== "other",
   };
   return invoke<string>("image_save", data, { headers: { "x-save": encodeURIComponent(JSON.stringify(options)) } });
+}
+
+/** Draws the markup onto the rendered pixels at full size. */
+function withMarkup(data: Uint8Array, w: number, h: number, edits: Edits, pipeline: Pipeline): Uint8Array {
+  const canvas = new OffscreenCanvas(w, h);
+  const ctx = canvas.getContext("2d", { willReadFrequently: true })!;
+  ctx.putImageData(new ImageData(new Uint8ClampedArray(data.buffer as ArrayBuffer, data.byteOffset, data.byteLength), w, h), 0, 0);
+  const m = mapper(edits.geometry, pipeline.src);
+  paintMarkup(ctx, edits.markup, (p) => m.toOutput(p[0], p[1]), 1);
+  const out = ctx.getImageData(0, 0, w, h).data;
+  return new Uint8Array(out.buffer, out.byteOffset, out.byteLength);
 }

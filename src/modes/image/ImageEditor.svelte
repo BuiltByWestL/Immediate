@@ -8,13 +8,14 @@
   import CropOverlay from "./CropOverlay.svelte";
   import { cropViewBox, rotatedSize } from "./geometry";
   import Inspector from "./Inspector.svelte";
+  import MarkupLayer from "./MarkupLayer.svelte";
   import { outputSize, Pipeline } from "./pipeline";
   import type { ImageInfo } from "./save";
 
   let { file }: { file: OpenedFile } = $props();
 
   let box: HTMLDivElement;
-  let canvas: HTMLCanvasElement;
+  let canvas = $state.raw() as HTMLCanvasElement;
   let pipeline = $state.raw<Pipeline | null>(null);
   let bw = $state(0);
   let bh = $state(0);
@@ -191,6 +192,9 @@
     ondblclick={() => (fitted ? zoomTo(1) : fit())}
   >
     <canvas bind:this={canvas} style:width="{bw}px" style:height="{bh}px"></canvas>
+    {#if !cropping && editor.ready && pipeline}
+      <MarkupLayer {scale} {tx} {ty} {bw} {bh} src={pipeline.src} glCanvas={canvas} active={editor.tab === "markup"} />
+    {/if}
     {#if cropping && editor.ready && pipeline}
       <CropOverlay {scale} {tx} {ty} src={pipeline.src} area={cropViewBox(editor.edits.geometry, pipeline.src)} />
     {/if}

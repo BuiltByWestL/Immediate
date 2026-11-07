@@ -130,3 +130,43 @@ export function flipHorizontal(g: Geometry): Geometry {
   const c = g.crop;
   return { ...g, flipH: !g.flipH, crop: { ...c, x: 1 - (c.x + c.w) }, angle: -g.angle, persH: -g.persH };
 }
+
+export interface Mapper {
+  out: Size;
+  /** Output pixel → source pixel. */
+  toSource(ox: number, oy: number): [number, number];
+  /** Source pixel → output pixel (inverse, solved numerically so perspective is exact too). */
+  toOutput(sx: number, sy: number): [number, number];
+}
+
+/** Point mapping between the edited output and the original photo, for one geometry. */
+export function mapper(g: Geometry, src: Size): Mapper {
+  const c = effectiveCrop(g, src);
+  const rot = rotatedSize(src, g);
+  const out = { w: Math.max(1, Math.round(rot.w * c.w)), h: Math.max(1, Math.round(rot.h * c.h)) };
+  const toSource = (ox: number, oy: number): [number, number] => {
+    const [u, v] = sourceUV(c.x + (ox / out.w) * c.w, c.y + (oy / out.h) * c.h, g, src);
+    return [u * src.w, v * src.h];
+  };
+  let guess: [number, number] = [out.w / 2, out.h / 2];
+  const toOutput = (sx: number, sy: number): [number, number] => {
+    // Newton's method from the previous answer (neighbouring points are close).
+    let [x, y] = guess;
+    for (let i = 0; i < 20; i++) {
+      const [fx, fy] = toSource(x, y);
+      const ex = fx - sx;
+      const ey = fy - sy;
+      if (Math.abs(ex) + Math.abs(ey) < 0.005) break;
+      const [ax, ay] = toSource(x + 1, y);
+      const [bx, by] = toSource(x, y + 1);
+      const j11 = ax - fx, j21 = ay - fy, j12 = bx - fx, j22 = by - fy;
+      const det = j11 * j22 - j12 * j21;
+      if (Math.abs(det) < 1e-12) break;
+      x -= (j22 * ex - j12 * ey) / det;
+      y -= (-j21 * ex + j11 * ey) / det;
+    }
+    guess = [x, y];
+    return [x, y];
+  };
+  return { out, toSource, toOutput };
+}

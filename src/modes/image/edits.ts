@@ -1,3 +1,5 @@
+import type { Shape } from "./markup";
+
 // The edit model for photos: plain data, so undo is a stack of snapshots and nothing is ever
 // written until Save. All slider values run -100..100 (0 = untouched) unless noted.
 
@@ -46,6 +48,8 @@ export interface Edits {
   geometry: Geometry;
   /** Auto-enhance: slider offsets computed from the photo, applied on top (null = off). */
   auto: Partial<Adjust> | null;
+  /** Drawings on top, in source pixels (see markup.ts). */
+  markup: Shape[];
 }
 
 export const NEUTRAL_ADJUST: Adjust = {
@@ -66,6 +70,7 @@ export function neutralEdits(): Edits {
     filter: { id: null, amount: 100 },
     geometry: structuredClone(NEUTRAL_GEOMETRY),
     auto: null,
+    markup: [],
   };
 }
 
@@ -73,7 +78,7 @@ export function neutralEdits(): Edits {
 export const clone = (e: Edits): Edits => JSON.parse(JSON.stringify(e));
 
 export function isNeutral(e: Edits): boolean {
-  return JSON.stringify(e.adjust) === JSON.stringify(NEUTRAL_ADJUST) && !e.filter.id && !e.auto && !geometryChanged(e.geometry);
+  return JSON.stringify(e.adjust) === JSON.stringify(NEUTRAL_ADJUST) && !e.filter.id && !e.auto && !e.markup.length && !geometryChanged(e.geometry);
 }
 
 export function geometryChanged(g: Geometry): boolean {

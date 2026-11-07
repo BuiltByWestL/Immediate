@@ -1,6 +1,7 @@
 // Editing session for the open photo: the edits, undo/redo history and "unsaved" state.
 
 import { clone, isNeutral, neutralEdits, type Edits } from "./edits";
+import type { ToolId } from "./markup";
 import type { Pipeline } from "./pipeline";
 import type { ImageInfo } from "./save";
 
@@ -22,6 +23,10 @@ export const editor = $state({
   comparing: false,
   tab: "adjust" as Tab,
   saving: false,
+  /** Markup tool settings. */
+  tool: "pen" as ToolId,
+  color: "#ff3b30",
+  size: "m" as "s" | "m" | "l",
   /** The photo is loaded on the GPU and ready to edit. */
   ready: false,
   error: "",
