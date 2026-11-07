@@ -11,7 +11,7 @@ import { resolve, dirname } from "node:path";
 const root = resolve(import.meta.dirname, "..");
 const formats = JSON.parse(readFileSync(resolve(root, "src/formats.json"), "utf8"));
 const check = process.argv.includes("--check");
-const KINDS = { image: "Image", video: "Video", audio: "Audio" };
+const KINDS = { image: "Image", video: "Video", audio: "Audio", document: "Document" };
 
 const entries = []; // { ext, kind, editable, mime }
 for (const kind of Object.keys(KINDS)) {
@@ -67,7 +67,7 @@ add('  WriteRegStr HKCU "Software\\Immediate\\Capabilities" "ApplicationDescript
 add('  WriteRegStr HKCU "Software\\RegisteredApplications" "Immediate" "Software\\Immediate\\Capabilities"');
 for (const e of entries) {
   add(`  !insertmacro IMMEDIATE_OPENWITH "${e.ext}" "Immediate.${KINDS[e.kind]}"`);
-  if (!formats.noVerb.includes(e.ext)) {
+  if (!formats.noVerb.includes(e.ext) && e.kind !== "document") {
     add(`  !insertmacro IMMEDIATE_VERB "${e.ext}" "${e.editable ? "Edit with Immediate" : "Open in Immediate"}"`);
   }
 }

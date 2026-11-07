@@ -95,6 +95,15 @@ export function dismiss(id: number) {
   ui.toasts = ui.toasts.filter((t) => t.id !== id);
 }
 
+// ---- leaving a file ----
+
+/** Checks registered by views with unsaved work; all must agree before moving to another file. */
+export const leaveGuards = new Set<() => Promise<boolean>>();
+async function canLeave(): Promise<boolean> {
+  for (const g of leaveGuards) if (!(await g())) return false;
+  return true;
+}
+
 // ---- opening files ----------------------------------------------------------------------
 
 let openSeq = 0;
@@ -136,6 +145,7 @@ async function show(path: string): Promise<boolean> {
 /** Opens files: one file browses its folder; several become a set to browse. */
 export async function openPaths(paths: string[], append = false) {
   if (!paths.length) return;
+  if (!append && !(await canLeave())) return;
   if (append && ui.file) {
     const base = ui.isSet ? ui.list : [ui.file.path];
     ui.list = [...base, ...paths.filter((p) => !base.includes(p))];
@@ -172,12 +182,14 @@ export async function openPaths(paths: string[], append = false) {
 export async function go(delta: number) {
   const i = ui.index + delta;
   if (i < 0 || i >= ui.list.length || i === ui.index) return;
+  if (!(await canLeave())) return;
   ui.index = i;
   await show(ui.list[i]);
 }
 
 export async function goTo(i: number) {
   if (i < 0 || i >= ui.list.length) return;
+  if (!(await canLeave())) return;
   ui.index = i;
   await show(ui.list[i]);
 }

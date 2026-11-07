@@ -4,6 +4,7 @@ mod formats;
 mod image;
 mod media;
 mod settings;
+mod text;
 mod themes;
 mod tools;
 mod update;
@@ -126,6 +127,8 @@ pub fn run() {
             image::image_save,
             settings::settings_get,
             settings::settings_set,
+            text::read_text,
+            text::save_text,
             themes::themes_custom,
             themes::themes_folder,
             tools::tools_status,

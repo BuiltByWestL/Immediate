@@ -72,7 +72,8 @@
         win.destroy();
         return;
       }
-      if (!hasChanges() && !mediaChanged()) return;
+      const { docChanged } = await import("./modes/doc/doc.svelte");
+      if (!hasChanges() && !mediaChanged() && !docChanged()) return;
       e.preventDefault();
       const ok = await ask({
         title: "Close without saving?",

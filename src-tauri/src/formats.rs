@@ -12,6 +12,7 @@ pub enum Kind {
     Image,
     Video,
     Audio,
+    Document,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -27,7 +28,7 @@ fn table() -> &'static HashMap<String, Format> {
         let json: serde_json::Value =
             serde_json::from_str(include_str!("../../src/formats.json")).expect("formats.json");
         let mut map = HashMap::new();
-        for (key, kind) in [("image", Kind::Image), ("video", Kind::Video), ("audio", Kind::Audio)] {
+        for (key, kind) in [("image", Kind::Image), ("video", Kind::Video), ("audio", Kind::Audio), ("document", Kind::Document)] {
             for (group, editable) in [("edit", true), ("view", false)] {
                 if let Some(exts) = json[key][group].as_object() {
                     for ext in exts.keys() {
@@ -55,7 +56,9 @@ mod tests {
         assert_eq!(lookup(Path::new("clip.mkv")).unwrap().kind, Kind::Video);
         assert_eq!(lookup(Path::new("memo.opus")).unwrap().kind, Kind::Audio);
         assert!(!lookup(Path::new("raw.CR3")).unwrap().editable);
-        assert!(lookup(Path::new("notes.txt")).is_none());
+        assert_eq!(lookup(Path::new("notes.txt")).unwrap().kind, Kind::Document);
+        assert!(!lookup(Path::new("sheet.xlsx")).unwrap().editable);
+        assert!(lookup(Path::new("archive.zip")).is_none());
         assert!(lookup(Path::new("no_extension")).is_none());
     }
 }

@@ -523,6 +523,108 @@
         ],
         "mimeType": "audio/vnd.dts",
         "name": "Audio file"
+      },
+      {
+        "ext": [
+          "txt",
+          "log",
+          "ini"
+        ],
+        "mimeType": "text/plain",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "md",
+          "markdown"
+        ],
+        "mimeType": "text/markdown",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "csv"
+        ],
+        "mimeType": "text/csv",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "tsv"
+        ],
+        "mimeType": "text/tab-separated-values",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "json"
+        ],
+        "mimeType": "application/json",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "xml"
+        ],
+        "mimeType": "application/xml",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "yaml",
+          "yml"
+        ],
+        "mimeType": "application/yaml",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "srt"
+        ],
+        "mimeType": "application/x-subrip",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "vtt"
+        ],
+        "mimeType": "text/vtt",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "pdf"
+        ],
+        "mimeType": "application/pdf",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "xlsx"
+        ],
+        "mimeType": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "xls"
+        ],
+        "mimeType": "application/vnd.ms-excel",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "ods"
+        ],
+        "mimeType": "application/vnd.oasis.opendocument.spreadsheet",
+        "name": "Document file"
+      },
+      {
+        "ext": [
+          "docx"
+        ],
+        "mimeType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "name": "Document file"
       }
     ]
   }

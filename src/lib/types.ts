@@ -32,7 +32,7 @@ export const DEFAULT_SETTINGS: Settings = {
   filmstrip: true,
 };
 
-export type Kind = "image" | "video" | "audio";
+export type Kind = "image" | "video" | "audio" | "document";
 
 export interface OpenedFile {
   path: string;

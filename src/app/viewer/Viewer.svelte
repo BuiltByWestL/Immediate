@@ -13,14 +13,21 @@
   const failed = $derived(failure?.path === file.path ? failure.reason : null);
   const fail = (path: string) => (reason: string) => (failure = { path, reason });
 
-  const NOUN = { image: "pictures", video: "videos", audio: "audio files" };
+  const NOUN = { image: "pictures", video: "videos", audio: "audio files", document: "documents" };
+  const loadDocument = () => import("../../modes/doc/DocumentView.svelte");
   const unsupported = $derived(
     file.kind !== "image" || canPreview(file) ? null : `Immediate can’t show .${file.ext.toUpperCase()} ${NOUN[file.kind]} yet.`,
   );
 </script>
 
 <div class="canvas">
-  {#if unsupported || failed}
+  {#if file.kind === "document"}
+    {#key file.path}
+      {#await loadDocument() then m}
+        <m.default {file} />
+      {/await}
+    {/key}
+  {:else if unsupported || failed}
     <NoPreview {file} reason={(unsupported ?? failed)!} />
   {:else if file.kind === "image"}
     <ImageView path={file.path} rust={needsDecoding(file)} onfail={fail(file.path)} />

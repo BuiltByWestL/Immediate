@@ -3,7 +3,7 @@ import type { OpenedFile } from "./types";
 
 type Group = Record<string, string>;
 type Entry = { edit: Group; view: Group };
-const kinds = { image: formats.image as Entry, video: formats.video as Entry, audio: formats.audio as Entry };
+const kinds = { image: formats.image as Entry, video: formats.video as Entry, audio: formats.audio as Entry, document: formats.document as Entry };
 
 /** Every extension Immediate opens (for the Open dialog). */
 export const ALL_EXTENSIONS = Object.values(kinds).flatMap((k) => [...Object.keys(k.edit), ...Object.keys(k.view)]);
@@ -33,6 +33,7 @@ export function canPreview(f: OpenedFile): boolean {
 
 /** Pictures the editor opens (vector and icon files are view only). */
 export function canEdit(f: OpenedFile): boolean {
+  if (f.kind === "document") return false; // documents edit in place in their viewer
   if (f.kind !== "image") return true; // video/audio editing goes through media tools
   return f.ext !== "svg" && f.ext !== "ico" && canPreview(f);
 }
@@ -42,7 +43,7 @@ export function isNativeImagePath(path: string): boolean {
   return NATIVE.image.has(ext);
 }
 
-const KIND_NAMES = { image: "Image", video: "Video", audio: "Audio" };
+const KIND_NAMES = { image: "Image", video: "Video", audio: "Audio", document: "Document" };
 export function kindName(f: OpenedFile) {
   return KIND_NAMES[f.kind];
 }

@@ -1,5 +1,5 @@
 {
-  "$comment": "Every file type Immediate opens: kind -> edit|view -> extension -> MIME type. Single source of truth for the Rust core, the UI, and the OS file associations (scripts/gen-associations.mjs). 'noVerb' extensions get 'Open with' but no 'Edit with Immediate' right-click entry, because other kinds of files commonly share them.",
+  "$comment": "Every file type Immediate opens: kind -> edit|view -> extension -> MIME type. Single source of truth for the Rust core, the UI, and the OS file associations (scripts/gen-associations.mjs). 'noVerb' extensions get 'Open with' but no 'Edit with Immediate' right-click entry, because other kinds of files commonly share them. Documents only get 'Open with', never a right-click entry.",
   "image": {
     "edit": {
       "jpg": "image/jpeg",
@@ -103,5 +103,31 @@
       "dts": "audio/vnd.dts"
     }
   },
-  "noVerb": ["ts"]
+  "document": {
+    "edit": {
+      "txt": "text/plain",
+      "log": "text/plain",
+      "md": "text/markdown",
+      "markdown": "text/markdown",
+      "csv": "text/csv",
+      "tsv": "text/tab-separated-values",
+      "json": "application/json",
+      "xml": "application/xml",
+      "yaml": "application/yaml",
+      "yml": "application/yaml",
+      "ini": "text/plain",
+      "srt": "application/x-subrip",
+      "vtt": "text/vtt"
+    },
+    "view": {
+      "pdf": "application/pdf",
+      "xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "xls": "application/vnd.ms-excel",
+      "ods": "application/vnd.oasis.opendocument.spreadsheet",
+      "docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    }
+  },
+  "noVerb": [
+    "ts"
+  ]
 }

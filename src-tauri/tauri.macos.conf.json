@@ -127,6 +127,38 @@
         "name": "Audio file",
         "role": "Viewer",
         "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "txt",
+          "log",
+          "md",
+          "markdown",
+          "csv",
+          "tsv",
+          "json",
+          "xml",
+          "yaml",
+          "yml",
+          "ini",
+          "srt",
+          "vtt"
+        ],
+        "name": "Document file",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "pdf",
+          "xlsx",
+          "xls",
+          "ods",
+          "docx"
+        ],
+        "name": "Document file",
+        "role": "Viewer",
+        "rank": "Alternate"
       }
     ]
   }
