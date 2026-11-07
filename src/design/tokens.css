@@ -1,0 +1,129 @@
+/*
+  Immediate design tokens.
+  Every color in the UI comes from these variables; a theme is a set of values for them.
+  P0 ships only the System pair (Paper / Graphite). The full theme gallery arrives in P1.
+*/
+
+@font-face {
+  font-family: "Immediate Sans";
+  src: url("../fonts/InterVariable-subset.woff2") format("woff2-variations"),
+    url("../fonts/InterVariable-subset.woff2") format("woff2");
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: block;
+}
+
+:root {
+  /* Spacing: one 4 px grid */
+  --s1: 4px;
+  --s2: 8px;
+  --s3: 12px;
+  --s4: 16px;
+  --s6: 24px;
+  --s8: 32px;
+
+  /* Type: one scale, three sizes */
+  --text-sm: 12px;
+  --text-md: 13px;
+  --text-lg: 17px;
+
+  /*
+    Inter tuned to read like Helvetica Neue (picked by side-by-side specimen against
+    Helvetica Neue Roman/Medium, see scripts/font-specimen.html):
+    optical size 28 matches Neue's width and tight spacing; 420 ≈ Roman, 570 ≈ Medium.
+    Dark themes shave 10 off because light-on-dark text reads heavier.
+  */
+  --opsz: 28;
+  --w-regular: 420;
+  --w-medium: 570;
+  --w-bold: 680;
+
+  --radius: 6px;
+  --motion: 140ms;
+
+  /* Paper (light, monochrome) */
+  --bg: #f5f5f4;
+  --panel: #ececea;
+  --panel-raised: #ffffff;
+  --line: #d6d6d3;
+  --text: #161616;
+  --text-dim: #5e5e5b;
+  --accent: #161616;
+  --on-accent: #ffffff;
+  --focus: #161616;
+  --danger: #c4302b;
+  --canvas: #e6e6e6;
+
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Graphite (dark, monochrome) */
+    --bg: #1b1b1c;
+    --panel: #232325;
+    --panel-raised: #2c2c2f;
+    --line: #3a3a3d;
+    --text: #ededed;
+    --text-dim: #a3a3a6;
+    --accent: #ededed;
+    --on-accent: #161616;
+    --focus: #ededed;
+    --danger: #ff6b63;
+    --canvas: #161617;
+
+    --w-regular: 410;
+    --w-medium: 560;
+    --w-bold: 670;
+
+    color-scheme: dark;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :root {
+    --motion: 0ms;
+  }
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font-family: "Immediate Sans", "Helvetica Neue", Helvetica, Arial, sans-serif;
+  font-size: var(--text-md);
+  font-weight: var(--w-regular);
+  line-height: 1.4;
+  font-variation-settings: "opsz" var(--opsz);
+  font-synthesis: none;
+  /* cv10: G with spur, ss03: round quotes & commas — both as in Helvetica Neue */
+  font-feature-settings: "cv10" 1, "ss03" 1;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  user-select: none;
+  -webkit-user-select: none;
+  cursor: default;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Form controls don't inherit fonts by default. */
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  font-variation-settings: inherit;
+  font-feature-settings: inherit;
+}
+
+/* Numbers that change (slider values, timecodes, sizes) never jiggle. */
+.num {
+  font-variant-numeric: tabular-nums;
+}

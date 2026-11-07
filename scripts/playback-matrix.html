@@ -1,0 +1,47 @@
+<!doctype html>
+<!--
+  Playback matrix: which fixtures the webview engine can decode natively.
+  Anything that fails here needs Immediate's ffmpeg preview proxy.
+  Run `node scripts/make-fixtures.mjs`, then load this page in a Chromium/WebKit browser
+  started with --allow-file-access-from-files (or headless with --dump-dom).
+
+  Windows result (2026-11-07, headless Edge — same Chromium engine as WebView2 157 on this PC):
+    native:  H.264, HEVC 8/10-bit (MP4 + MKV), VP9, AV1, AAC, Opus, MP3, FLAC, WAV
+    proxy:   ProRes (no video), MPEG-2 (.mpg), MPEG-4 Part 2 (.avi)
+    caution: AC-3 audio is not decoded by Chromium -> video plays silent; the app must
+             decide per stream from ffprobe codec names, not from "it loaded".
+-->
+<html lang="en">
+<head><meta charset="utf-8"><title>pending</title></head>
+<body>
+<pre id="out"></pre>
+<script type="module">
+  const files = [
+    "h264-aac.mp4", "hevc-aac.mp4", "hevc-10bit.mkv", "vp9-opus.webm", "av1-opus.mkv",
+    "h264-ac3.mkv", "prores-pcm.mov", "mpeg2-mp2.mpg", "mpeg4-mp3.avi", "with-subs.mkv",
+    "tone.wav", "tone.flac", "tone.mp3", "tone.m4a", "tone.opus",
+  ];
+  const isAudio = (f) => f.startsWith("tone.");
+  const probe = (f) => new Promise((done) => {
+    const el = document.createElement(isAudio(f) ? "audio" : "video");
+    el.muted = true;
+    el.preload = "auto";
+    const t = setTimeout(() => done("timeout"), 4000);
+    el.addEventListener("loadeddata", () => {
+      clearTimeout(t);
+      // Video: decoded dimensions must be real. Audio: duration must be known.
+      if (!isAudio(f) && !el.videoWidth) return done("no-video");
+      // Audio-in-video check: does the element report an audio track?
+      const audio = isAudio(f) || el.mozHasAudio || (el.webkitAudioDecodedByteCount ?? 1) > 0 || el.audioTracks?.length > 0;
+      done(audio ? "ok" : "ok (video only?)");
+    });
+    el.addEventListener("error", () => { clearTimeout(t); done("error " + (el.error?.code ?? "")); });
+    el.src = "../test-fixtures/" + f;
+  });
+  const rows = [];
+  for (const f of files) rows.push(`${f.padEnd(28)} ${await probe(f)}`);
+  document.getElementById("out").textContent = rows.join("\n");
+  document.title = "done";
+</script>
+</body>
+</html>
