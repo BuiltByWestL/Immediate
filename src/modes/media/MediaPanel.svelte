@@ -37,6 +37,9 @@
       e.cuts = [];
       e.mute = false;
       e.gain = 0;
+      e.fadeIn = 0;
+      e.fadeOut = 0;
+      e.normalize = false;
     });
   }
 
@@ -63,6 +66,7 @@
   });
 
   const SIZES = [8, 10, 25, 50, 100];
+  const FADES = [0, 0.5, 1, 2, 3, 5];
 </script>
 
 <aside class="panel" aria-label="Edit">
@@ -90,8 +94,33 @@
           <span>Remove sound</span>
           <button type="button" class="switch" role="switch" aria-checked={media.edit.mute} aria-label="Remove sound" onclick={() => changeMedia((e) => (e.mute = !e.mute))}></button>
         </div>
-        {#if advanced && !media.edit.mute}
-          <Slider label="Volume (dB)" min={-20} max={20} bind:value={media.edit.gain} oncommit={commitMedia} />
+        {#if !media.edit.mute}
+          {#if advanced || !isVideo}
+            <Slider label="Volume (dB)" min={-20} max={20} bind:value={media.edit.gain} oncommit={commitMedia} />
+          {/if}
+          {#if advanced || !isVideo}
+            <div class="fades">
+              <label>
+                <span>Fade in</span>
+                <select class="field" value={String(media.edit.fadeIn)} onchange={(e) => changeMedia((ed) => (ed.fadeIn = Number(e.currentTarget.value)))}>
+                  {#each FADES as f (f)}<option value={String(f)}>{f ? `${f} s` : "None"}</option>{/each}
+                </select>
+              </label>
+              <label>
+                <span>Fade out</span>
+                <select class="field" value={String(media.edit.fadeOut)} onchange={(e) => changeMedia((ed) => (ed.fadeOut = Number(e.currentTarget.value)))}>
+                  {#each FADES as f (f)}<option value={String(f)}>{f ? `${f} s` : "None"}</option>{/each}
+                </select>
+              </label>
+            </div>
+            <div class="toggle">
+              <span>Even out loudness</span>
+              <button type="button" class="switch" role="switch" aria-checked={media.edit.normalize} aria-label="Even out loudness" onclick={() => changeMedia((e) => (e.normalize = !e.normalize))}></button>
+            </div>
+            {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize)}
+              <p class="hint">Fades and loudness re-encode the video too, so saving takes longer.</p>
+            {/if}
+          {/if}
         {/if}
       </section>
     {/if}
@@ -195,6 +224,18 @@
     justify-content: space-between;
     min-height: 28px;
     margin-bottom: var(--s1);
+  }
+  .fades {
+    display: flex;
+    gap: var(--s3);
+    margin: var(--s2) 0;
+  }
+  .fades label {
+    flex: 1;
+    display: grid;
+    gap: 2px;
+    font-size: var(--text-sm);
+    color: var(--text-dim);
   }
   .chips {
     display: flex;

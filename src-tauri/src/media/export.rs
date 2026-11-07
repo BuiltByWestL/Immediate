@@ -35,6 +35,14 @@ pub struct ExportRequest {
     /// Volume change in dB (0 = unchanged). Video is still copied when it's the only change.
     #[serde(default)]
     gain_db: f64,
+    /// Fade in / out lengths in seconds (0 = none), on the saved result.
+    #[serde(default)]
+    fade_in: f64,
+    #[serde(default)]
+    fade_out: f64,
+    /// Even out loudness (EBU R128, -16 LUFS: a common level for speech and music online).
+    #[serde(default)]
+    normalize: bool,
     /// "copy" | "replace" | "path"
     target: String,
     dest: Option<String>,
@@ -295,8 +303,12 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     let has_video = !streams(&req.probe, "video").iter().all(|v| v["disposition"]["attached_pic"] == 1);
     let audio = streams(&req.probe, "audio");
 
+    // Fades and loudness change the sound over the whole result, so they need the frame-exact
+    // path (for audio files that costs nothing extra: audio is re-encoded either way).
+    let shaping = !req.mute && !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize);
     let (ext, mode) = match req.mode.as_str() {
         "smaller" => (if has_video { "mp4".to_owned() } else { "m4a".to_owned() }, "smaller"),
+        _ if shaping => (src_ext.clone(), "accurate"),
         // Changing the volume needs the audio re-encoded; the video can still be copied.
         "lossless" if req.gain_db.abs() > 0.01 => (src_ext.clone(), "lossless"),
         m => (src_ext.clone(), if m == "accurate" { "accurate" } else { "lossless" }),
@@ -397,10 +409,25 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     outs.push_str(&format!("[aout{k}]"));
                 }
                 fc.push_str(&format!("{concat_in}concat=n={}:v={nv}:a={na}{outs}", segs.len()));
+                // Sound shaping on the joined result: volume, loudness, fades.
+                let mut chain: Vec<String> = Vec::new();
                 if req.gain_db.abs() > 0.01 {
+                    chain.push(format!("volume={:.2}dB", req.gain_db));
+                }
+                if req.normalize {
+                    chain.push("loudnorm=I=-16:TP=-1.5:LRA=11".into());
+                }
+                if req.fade_in > 0.0 {
+                    chain.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(total)));
+                }
+                if req.fade_out > 0.0 {
+                    let d = req.fade_out.min(total);
+                    chain.push(format!("afade=t=out:st={:.3}:d={d:.3}", (total - d).max(0.0)));
+                }
+                if !chain.is_empty() {
                     for k in 0..na {
                         fc = fc.replacen(&format!("[aout{k}]"), &format!("[aout{k}pre]"), 1);
-                        fc.push_str(&format!(";[aout{k}pre]volume={:.2}dB[aout{k}]", req.gain_db));
+                        fc.push_str(&format!(";[aout{k}pre]{}[aout{k}]", chain.join(",")));
                     }
                 }
                 let mut a: Vec<String> = vec!["-i".into(), req.source.clone(), "-filter_complex".into(), fc];

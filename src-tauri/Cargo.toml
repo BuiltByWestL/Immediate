@@ -39,6 +39,8 @@ drag = "2.1.1"
 reqwest = { version = "0.13", default-features = false, features = ["stream", "rustls-no-provider"] }
 rustls = { version = "0.23", default-features = false, features = ["ring"] }
 sha2 = "0.10"
+cpal = "0.18.2"
+hound = "3.5.1"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

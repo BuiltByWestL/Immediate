@@ -8,6 +8,7 @@ export const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
       [[MOD, "O"], "Open a file"],
       [[MOD, "V"], "Open what’s on the clipboard"],
       [[MOD, "N"], "New window"],
+      [[MOD, "R"], "Record audio"],
       [[MOD, "W"], "Close window"],
       [["←", "→"], "Previous / next file in the folder"],
       [["Home", "End"], "First / last file"],

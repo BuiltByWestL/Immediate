@@ -1,7 +1,9 @@
 <script lang="ts">
   import ClipboardPaste from "@lucide/svelte/icons/clipboard-paste";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
+  import Mic from "@lucide/svelte/icons/mic";
   import { pasteFromClipboard, pickFiles } from "../lib/app.svelte";
+  import { openRecorder } from "../lib/record.svelte";
 
   const mod = window.__IMMEDIATE__?.platform === "macos" ? "⌘" : "Ctrl+";
 </script>
@@ -18,6 +20,9 @@
       </button>
       <button type="button" class="btn lg" onclick={pasteFromClipboard} title="{mod}V">
         <ClipboardPaste size={16} strokeWidth={1.5} />Paste
+      </button>
+      <button type="button" class="btn lg" onclick={openRecorder} title="{mod}R">
+        <Mic size={16} strokeWidth={1.5} />Record audio
       </button>
     </div>
   </div>

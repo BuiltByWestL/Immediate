@@ -18,6 +18,8 @@
   import { mediaKeys } from "./modes/media/keys";
   import { changeMedia, media, mediaChanged, redoMedia, undoMedia } from "./modes/media/session.svelte";
   import { prepareToolsInBackground } from "./lib/tools.svelte";
+  import Recorder from "./app/Recorder.svelte";
+  import { closeRecorder, openRecorder, rec, startRecording, stopRecording, togglePause } from "./lib/record.svelte";
   import { beginEdit, cancelEdit, copyEdited, save } from "./modes/image/actions";
   import { editor, hasChanges, redo, undo } from "./modes/image/editor.svelte";
   import { canEdit } from "./lib/formats";
@@ -63,6 +65,13 @@
     // Closing a window with unsaved edits asks first.
     const win = getCurrentWindow();
     const unclose = win.onCloseRequested(async (e) => {
+      if (rec.open && rec.phase === "recording") {
+        // Closing mid-recording keeps what was recorded.
+        e.preventDefault();
+        await stopRecording(true);
+        win.destroy();
+        return;
+      }
       if (!hasChanges() && !mediaChanged()) return;
       e.preventDefault();
       const ok = await ask({
@@ -94,6 +103,16 @@
     const key = e.key;
 
     if (ui.confirm) return;
+    if (rec.open && !ui.dialog) {
+      const k = key.toLowerCase();
+      if (rec.phase === "ready" && (k === "r" || key === " ")) startRecording();
+      else if (rec.phase === "ready" && key === "Escape") closeRecorder();
+      else if (rec.phase === "recording" && (key === " " || key === "Enter")) stopRecording(true);
+      else if (rec.phase === "recording" && k === "p") togglePause();
+      else return;
+      e.preventDefault();
+      return;
+    }
     if (media.active && !ui.dialog) {
       const k = key.toLowerCase();
       if (mod) {
@@ -141,6 +160,7 @@
     if (mod) {
       const k = key.toLowerCase();
       if (k === "o") pickFiles();
+      else if (k === "r" && !hasChanges() && !mediaChanged()) openRecorder();
       else if (k === "v" && !typing(e.target)) pasteFromClipboard();
       else if (k === "n") newWindow();
       else if (k === "w") getCurrentWindow().close();
@@ -185,7 +205,9 @@
 <div class="app">
   <Toolbar />
   <div class="main">
-    {#if ui.file && media.active}
+    {#if rec.open}
+      <Recorder />
+    {:else if ui.file && media.active}
       {#key ui.file.path}
         {#await loadMediaEditor() then m}
           <m.default file={ui.file} />
