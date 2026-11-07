@@ -1,12 +1,18 @@
+mod chrome;
+mod files;
+mod formats;
+mod settings;
+mod themes;
+mod tools;
 mod update;
+mod wm;
 
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 use serde::Deserialize;
-use tauri::webview::{PageLoadEvent, WebviewBuilder};
-use tauri::window::{Color, WindowBuilder};
-use tauri::{Manager, PhysicalPosition, WebviewUrl, Window};
+use tauri::webview::PageLoadEvent;
+use tauri::{Manager, Window, WindowEvent};
 
 /// Process start, used for the startup budget (`scripts/bench-startup.mjs`).
 static START: OnceLock<(Instant, f64)> = OnceLock::new();
@@ -17,7 +23,7 @@ fn since_start() -> u64 {
     START.get().map_or(0, |(s, _)| s.elapsed().as_millis() as u64)
 }
 
-fn mark(name: &'static str) {
+pub(crate) fn mark(name: &'static str) {
     if let Ok(mut m) = MARKS.lock() {
         m.push((name, since_start()));
     }
@@ -67,41 +73,36 @@ pub fn run() {
         .map_or(0.0, |d| d.as_secs_f64() * 1000.0);
     START.get_or_init(|| (Instant::now(), epoch_ms));
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default();
+    // A second launch (double-click, "Open with", right-click) hands its files to this process,
+    // which opens them in a window right away. Benchmarks and tests run standalone.
+    let standalone = std::env::var_os("IMMEDIATE_BENCH_OUT").is_some() || std::env::var_os("IMMEDIATE_UPDATE_TEST").is_some();
+    if !standalone {
+        builder = builder.plugin(tauri_plugin_single_instance::init(|app, argv, cwd| {
+            wm::deliver(app, wm::files_from_args(argv.into_iter().skip(1), std::path::Path::new(&cwd)));
+        }));
+    }
+
+    let app = builder
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::PendingUpdate::default())
+        .manage(wm::Wm::default())
         .setup(|app| {
             mark("setup");
+            app.manage(settings::SettingsState::load(app.handle()));
             update::run_test_hook(app.handle());
-            // Show a plain native window right away, painted in the theme's background color,
-            // then attach the webview. On Windows, WebView2 needs ~250 ms to start its browser
-            // process; without this split nothing would be on screen during that time.
-            let bg = Color(0x1b, 0x1b, 0x1c, 0xff);
-            WindowBuilder::new(app, "main")
-                .title("Immediate")
-                .inner_size(1100.0, 720.0)
-                .min_inner_size(560.0, 400.0)
-                .center()
-                .background_color(bg)
-                .visible(true)
-                .build()?;
-            mark("windowShown");
-
-            // Attach the webview once the event loop has had a chance to paint the window.
-            let handle = app.handle().clone();
-            handle.clone().run_on_main_thread(move || {
-                let Some(window) = handle.get_window("main") else { return };
-                let size = window.inner_size().unwrap_or_default();
-                let webview = WebviewBuilder::new("main-view", WebviewUrl::default())
-                    .background_color(bg)
-                    .auto_resize();
-                if let Err(e) = window.add_child(webview, PhysicalPosition::new(0, 0), size) {
-                    eprintln!("failed to create webview: {e}");
-                }
-                mark("webviewBuilt");
-            })?;
+            let cwd = std::env::current_dir().unwrap_or_default();
+            wm::open_window(app.handle(), wm::files_from_args(std::env::args().skip(1), &cwd))?;
             Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            WindowEvent::ThemeChanged(_) => {
+                chrome::apply(window.app_handle(), window);
+            }
+            WindowEvent::Destroyed => wm::forget(window.app_handle(), window.label()),
+            _ => {}
         })
         .on_page_load(|_, payload| match payload.event() {
             PageLoadEvent::Started => mark("pageStarted"),
@@ -109,9 +110,30 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_ready,
+            files::open_path,
+            files::list_folder,
+            files::file_details,
+            files::clipboard_paste,
+            files::reveal,
+            settings::settings_get,
+            settings::settings_set,
+            themes::themes_custom,
+            themes::themes_folder,
+            tools::tools_status,
+            wm::inbox_take,
+            wm::open_in_new_window,
             update::update_check,
             update::update_install
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running Immediate");
+        .build(tauri::generate_context!())
+        .expect("error while starting Immediate");
+
+    app.run(|_app, _event| {
+        // macOS delivers "Open with" / double-clicked files as an event instead of arguments.
+        #[cfg(target_os = "macos")]
+        if let tauri::RunEvent::Opened { urls } = _event {
+            let files = urls.into_iter().filter_map(|u| u.to_file_path().ok());
+            wm::deliver(_app, wm::path_list(files));
+        }
+    });
 }

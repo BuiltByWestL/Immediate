@@ -1,0 +1,12 @@
+{
+  "name": "Ink",
+  "group": "Monochrome",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#000000", "panel": "#0b0b0b", "raised": "#161616", "hover": "#1f1f1f",
+    "line": "#262626", "lineStrong": "#6b6b6b",
+    "text": "#f2f2f2", "textDim": "#9a9a9a",
+    "accent": "#ffffff", "onAccent": "#000000", "focus": "#ffffff",
+    "danger": "#ff5f57", "canvas": "#000000"
+  }
+}

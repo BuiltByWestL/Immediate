@@ -1,14 +1,14 @@
 import { mount } from "svelte";
 import { invoke } from "@tauri-apps/api/core";
 import "./design/tokens.css";
+import "./design/controls.css";
 import App from "./App.svelte";
 
 const scriptStart = performance.timeOrigin + performance.now();
 
 const app = mount(App, { target: document.getElementById("app")! });
 
-// The window is created hidden. Show it only after the first frame has been painted,
-// so the user never sees an empty or half-styled window.
+// Report the first painted frame (startup budget, scripts/bench-startup.mjs).
 requestAnimationFrame(() =>
   requestAnimationFrame(() => {
     const nav = performance.getEntriesByType("navigation")[0] as PerformanceNavigationTiming | undefined;

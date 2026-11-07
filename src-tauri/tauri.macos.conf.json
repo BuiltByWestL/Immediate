@@ -1,0 +1,133 @@
+{
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": [
+          "jpg",
+          "jpeg",
+          "jfif",
+          "png",
+          "webp",
+          "gif",
+          "bmp",
+          "tif",
+          "tiff",
+          "avif",
+          "heic",
+          "heif",
+          "ico",
+          "jxl",
+          "tga",
+          "pnm",
+          "ppm",
+          "pgm",
+          "pbm",
+          "qoi"
+        ],
+        "name": "Image file",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "svg",
+          "psd",
+          "psb",
+          "exr",
+          "hdr",
+          "dds",
+          "apng",
+          "dng",
+          "cr2",
+          "cr3",
+          "nef",
+          "nrw",
+          "arw",
+          "srf",
+          "sr2",
+          "orf",
+          "rw2",
+          "raf",
+          "pef",
+          "srw",
+          "3fr",
+          "iiq"
+        ],
+        "name": "Image file",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "mp4",
+          "m4v",
+          "mov",
+          "mkv",
+          "webm",
+          "avi",
+          "mpg",
+          "mpeg",
+          "vob",
+          "ts",
+          "m2ts",
+          "mts",
+          "3gp",
+          "3g2",
+          "flv",
+          "wmv",
+          "asf",
+          "ogv",
+          "f4v"
+        ],
+        "name": "Video file",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "mxf"
+        ],
+        "name": "Video file",
+        "role": "Viewer",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "mp3",
+          "wav",
+          "bwf",
+          "flac",
+          "aac",
+          "m4a",
+          "m4b",
+          "ogg",
+          "oga",
+          "opus",
+          "wma",
+          "aif",
+          "aiff",
+          "aifc",
+          "caf",
+          "ac3",
+          "eac3",
+          "mp2",
+          "amr",
+          "mka",
+          "wv"
+        ],
+        "name": "Audio file",
+        "role": "Editor",
+        "rank": "Alternate"
+      },
+      {
+        "ext": [
+          "ape",
+          "dts"
+        ],
+        "name": "Audio file",
+        "role": "Viewer",
+        "rank": "Alternate"
+      }
+    ]
+  }
+}

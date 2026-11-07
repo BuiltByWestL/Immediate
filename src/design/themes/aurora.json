@@ -1,0 +1,12 @@
+{
+  "name": "Aurora",
+  "group": "Colorful",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#121a18", "panel": "#16201d", "raised": "#1d2925", "hover": "#24322d",
+    "line": "#283630", "lineStrong": "#648278",
+    "text": "#e3f2ec", "textDim": "#93aea4",
+    "accent": "#3fd6b4", "onAccent": "#0c1412", "focus": "#a78bfa",
+    "danger": "#ff7a7a", "canvas": "#141414"
+  }
+}

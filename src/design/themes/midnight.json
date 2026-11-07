@@ -1,0 +1,12 @@
+{
+  "name": "Midnight",
+  "group": "Colorful",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#0e1424", "panel": "#121a2e", "raised": "#19223a", "hover": "#202b47",
+    "line": "#243050", "lineStrong": "#62729a",
+    "text": "#e6ecff", "textDim": "#98a5c8",
+    "accent": "#4d8dff", "onAccent": "#06102a", "focus": "#7aa9ff",
+    "danger": "#ff6b7d", "canvas": "#121212"
+  }
+}

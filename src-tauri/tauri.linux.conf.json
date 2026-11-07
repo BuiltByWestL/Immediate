@@ -1,0 +1,529 @@
+{
+  "bundle": {
+    "fileAssociations": [
+      {
+        "ext": [
+          "jpg",
+          "jpeg",
+          "jfif"
+        ],
+        "mimeType": "image/jpeg",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "png"
+        ],
+        "mimeType": "image/png",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "webp"
+        ],
+        "mimeType": "image/webp",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "gif"
+        ],
+        "mimeType": "image/gif",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "bmp"
+        ],
+        "mimeType": "image/bmp",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "tif",
+          "tiff"
+        ],
+        "mimeType": "image/tiff",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "avif"
+        ],
+        "mimeType": "image/avif",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "heic"
+        ],
+        "mimeType": "image/heic",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "heif"
+        ],
+        "mimeType": "image/heif",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "ico"
+        ],
+        "mimeType": "image/vnd.microsoft.icon",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "jxl"
+        ],
+        "mimeType": "image/jxl",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "tga"
+        ],
+        "mimeType": "image/x-tga",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "pnm"
+        ],
+        "mimeType": "image/x-portable-anymap",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "ppm"
+        ],
+        "mimeType": "image/x-portable-pixmap",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "pgm"
+        ],
+        "mimeType": "image/x-portable-graymap",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "pbm"
+        ],
+        "mimeType": "image/x-portable-bitmap",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "qoi"
+        ],
+        "mimeType": "image/qoi",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "svg"
+        ],
+        "mimeType": "image/svg+xml",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "psd",
+          "psb"
+        ],
+        "mimeType": "image/vnd.adobe.photoshop",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "exr"
+        ],
+        "mimeType": "image/x-exr",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "hdr"
+        ],
+        "mimeType": "image/vnd.radiance",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "dds"
+        ],
+        "mimeType": "image/vnd.ms-dds",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "apng"
+        ],
+        "mimeType": "image/apng",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "dng"
+        ],
+        "mimeType": "image/x-adobe-dng",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "cr2"
+        ],
+        "mimeType": "image/x-canon-cr2",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "cr3"
+        ],
+        "mimeType": "image/x-canon-cr3",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "nef"
+        ],
+        "mimeType": "image/x-nikon-nef",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "nrw"
+        ],
+        "mimeType": "image/x-nikon-nrw",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "arw"
+        ],
+        "mimeType": "image/x-sony-arw",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "srf"
+        ],
+        "mimeType": "image/x-sony-srf",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "sr2"
+        ],
+        "mimeType": "image/x-sony-sr2",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "orf"
+        ],
+        "mimeType": "image/x-olympus-orf",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "rw2"
+        ],
+        "mimeType": "image/x-panasonic-rw2",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "raf"
+        ],
+        "mimeType": "image/x-fuji-raf",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "pef"
+        ],
+        "mimeType": "image/x-pentax-pef",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "srw"
+        ],
+        "mimeType": "image/x-samsung-srw",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "3fr"
+        ],
+        "mimeType": "image/x-hasselblad-3fr",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "iiq"
+        ],
+        "mimeType": "image/x-phaseone-iiq",
+        "name": "Image file"
+      },
+      {
+        "ext": [
+          "mp4"
+        ],
+        "mimeType": "video/mp4",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "m4v"
+        ],
+        "mimeType": "video/x-m4v",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "mov"
+        ],
+        "mimeType": "video/quicktime",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "mkv"
+        ],
+        "mimeType": "video/x-matroska",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "webm"
+        ],
+        "mimeType": "video/webm",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "avi"
+        ],
+        "mimeType": "video/x-msvideo",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "mpg",
+          "mpeg",
+          "vob"
+        ],
+        "mimeType": "video/mpeg",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "ts",
+          "m2ts",
+          "mts"
+        ],
+        "mimeType": "video/mp2t",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "3gp"
+        ],
+        "mimeType": "video/3gpp",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "3g2"
+        ],
+        "mimeType": "video/3gpp2",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "flv"
+        ],
+        "mimeType": "video/x-flv",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "wmv"
+        ],
+        "mimeType": "video/x-ms-wmv",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "asf"
+        ],
+        "mimeType": "video/x-ms-asf",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "ogv"
+        ],
+        "mimeType": "video/ogg",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "f4v"
+        ],
+        "mimeType": "video/x-f4v",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "mxf"
+        ],
+        "mimeType": "application/mxf",
+        "name": "Video file"
+      },
+      {
+        "ext": [
+          "mp3",
+          "mp2"
+        ],
+        "mimeType": "audio/mpeg",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "wav",
+          "bwf"
+        ],
+        "mimeType": "audio/wav",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "flac"
+        ],
+        "mimeType": "audio/flac",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "aac"
+        ],
+        "mimeType": "audio/aac",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "m4a"
+        ],
+        "mimeType": "audio/mp4",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "m4b"
+        ],
+        "mimeType": "audio/x-m4b",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "ogg",
+          "oga"
+        ],
+        "mimeType": "audio/ogg",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "opus"
+        ],
+        "mimeType": "audio/opus",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "wma"
+        ],
+        "mimeType": "audio/x-ms-wma",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "aif",
+          "aiff"
+        ],
+        "mimeType": "audio/aiff",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "aifc"
+        ],
+        "mimeType": "audio/x-aifc",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "caf"
+        ],
+        "mimeType": "audio/x-caf",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "ac3"
+        ],
+        "mimeType": "audio/ac3",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "eac3"
+        ],
+        "mimeType": "audio/eac3",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "amr"
+        ],
+        "mimeType": "audio/amr",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "mka"
+        ],
+        "mimeType": "audio/x-matroska",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "wv"
+        ],
+        "mimeType": "audio/x-wavpack",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "ape"
+        ],
+        "mimeType": "audio/x-ape",
+        "name": "Audio file"
+      },
+      {
+        "ext": [
+          "dts"
+        ],
+        "mimeType": "audio/vnd.dts",
+        "name": "Audio file"
+      }
+    ]
+  }
+}

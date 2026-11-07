@@ -1,0 +1,12 @@
+{
+  "name": "Citrus",
+  "group": "Colorful",
+  "scheme": "light",
+  "tokens": {
+    "bg": "#fbf8ec", "panel": "#f5f1e0", "raised": "#fffdf5", "hover": "#eee9d2",
+    "line": "#e3ddc2", "lineStrong": "#8d886a",
+    "text": "#2c2a1c", "textDim": "#64604a",
+    "accent": "#4f7d00", "onAccent": "#ffffff", "focus": "#946f00",
+    "danger": "#b8321f", "canvas": "#e4e4e4"
+  }
+}

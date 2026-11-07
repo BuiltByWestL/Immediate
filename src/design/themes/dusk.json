@@ -1,0 +1,12 @@
+{
+  "name": "Dusk",
+  "group": "Faint",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#262a30", "panel": "#2a2f35", "raised": "#323840", "hover": "#394048",
+    "line": "#3c424b", "lineStrong": "#7a838f",
+    "text": "#d9dde3", "textDim": "#a0a8b3",
+    "accent": "#9db3cc", "onAccent": "#1f242a", "focus": "#9db3cc",
+    "danger": "#e88a80", "canvas": "#1c1c1c"
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "$comment": "Accent overrides, applied on top of any theme. Each has a value for light and dark themes.",
+  "blue":     { "name": "Blue",     "light": { "accent": "#0a66d8", "onAccent": "#ffffff" }, "dark": { "accent": "#4d9bff", "onAccent": "#06101f" } },
+  "violet":   { "name": "Violet",   "light": { "accent": "#6e46d9", "onAccent": "#ffffff" }, "dark": { "accent": "#a58bff", "onAccent": "#120b26" } },
+  "pink":     { "name": "Pink",     "light": { "accent": "#d0216b", "onAccent": "#ffffff" }, "dark": { "accent": "#ff6fa8", "onAccent": "#250914" } },
+  "red":      { "name": "Red",      "light": { "accent": "#c62d24", "onAccent": "#ffffff" }, "dark": { "accent": "#ff6a5f", "onAccent": "#240a08" } },
+  "orange":   { "name": "Orange",   "light": { "accent": "#b45200", "onAccent": "#ffffff" }, "dark": { "accent": "#ff9a3d", "onAccent": "#241302" } },
+  "yellow":   { "name": "Yellow",   "light": { "accent": "#866a00", "onAccent": "#ffffff" }, "dark": { "accent": "#f5cc3b", "onAccent": "#221b02" } },
+  "green":    { "name": "Green",    "light": { "accent": "#1f7a3a", "onAccent": "#ffffff" }, "dark": { "accent": "#4cd07a", "onAccent": "#06190d" } },
+  "graphite": { "name": "Graphite", "light": { "accent": "#3d3d3f", "onAccent": "#ffffff" }, "dark": { "accent": "#d0d0d3", "onAccent": "#161616" } }
+}

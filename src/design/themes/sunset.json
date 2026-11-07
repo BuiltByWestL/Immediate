@@ -1,0 +1,12 @@
+{
+  "name": "Sunset",
+  "group": "Colorful",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#1f1a1a", "panel": "#251f1f", "raised": "#2f2727", "hover": "#382e2d",
+    "line": "#3d3231", "lineStrong": "#87726d",
+    "text": "#f3e9e4", "textDim": "#bba79f",
+    "accent": "#ff8043", "onAccent": "#1f1a1a", "focus": "#ff5c9d",
+    "danger": "#ff5c5c", "canvas": "#161616"
+  }
+}

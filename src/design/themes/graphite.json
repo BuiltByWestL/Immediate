@@ -1,0 +1,12 @@
+{
+  "name": "Graphite",
+  "group": "Monochrome",
+  "scheme": "dark",
+  "tokens": {
+    "bg": "#1b1b1c", "panel": "#212123", "raised": "#2a2a2d", "hover": "#323235",
+    "line": "#36363a", "lineStrong": "#77777c",
+    "text": "#ededed", "textDim": "#a1a1a5",
+    "accent": "#ededed", "onAccent": "#161616", "focus": "#ededed",
+    "danger": "#ff6b63", "canvas": "#141414"
+  }
+}

@@ -11,10 +11,14 @@
     "preview": "vite preview",
     "check": "svelte-check --tsconfig ./tsconfig.json",
     "bench:startup": "node scripts/bench-startup.mjs",
+    "test:themes": "node scripts/theme-contrast-test.mjs",
+    "gen:associations": "node scripts/gen-associations.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
+    "@lucide/svelte": "^1.70.0",
     "@tauri-apps/api": "^2.12.4",
+    "@tauri-apps/plugin-dialog": "^2.8.4",
     "@tauri-apps/plugin-opener": "^2"
   },
   "devDependencies": {

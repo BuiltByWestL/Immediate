@@ -1,0 +1,12 @@
+{
+  "name": "Mist",
+  "group": "Faint",
+  "scheme": "light",
+  "tokens": {
+    "bg": "#eef0f3", "panel": "#e8ebef", "raised": "#f8f9fb", "hover": "#e0e4e9",
+    "line": "#d6dbe1", "lineStrong": "#7b8491",
+    "text": "#2a3038", "textDim": "#5c6571",
+    "accent": "#56718f", "onAccent": "#ffffff", "focus": "#56718f",
+    "danger": "#b0443c", "canvas": "#e4e4e4"
+  }
+}

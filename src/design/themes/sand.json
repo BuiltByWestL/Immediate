@@ -1,0 +1,12 @@
+{
+  "name": "Sand",
+  "group": "Faint",
+  "scheme": "light",
+  "tokens": {
+    "bg": "#f2eee8", "panel": "#ece7e0", "raised": "#f9f7f3", "hover": "#e5dfd6",
+    "line": "#dcd5ca", "lineStrong": "#8c8273",
+    "text": "#3a332b", "textDim": "#685f53",
+    "accent": "#86664a", "onAccent": "#ffffff", "focus": "#86664a",
+    "danger": "#ab4632", "canvas": "#e4e4e4"
+  }
+}

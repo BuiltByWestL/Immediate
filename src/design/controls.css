@@ -1,0 +1,182 @@
+/* Shared controls. One look for every button, field and switch in the app. */
+
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--s2);
+  height: var(--control-h);
+  padding: 0 var(--s3);
+  border-radius: var(--radius);
+  border: 1px solid var(--line);
+  background: var(--raised);
+  color: var(--text);
+  font-weight: var(--w-medium);
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background-color var(--motion) ease-out, border-color var(--motion) ease-out;
+}
+.btn:hover {
+  background: var(--hover);
+}
+.btn:active {
+  border-color: var(--line-strong);
+}
+.btn.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+.btn.primary:hover {
+  filter: brightness(1.08);
+}
+[data-scheme="light"] .btn.primary:hover {
+  filter: brightness(0.92);
+}
+.btn.lg {
+  height: 32px;
+  padding: 0 var(--s4);
+}
+.btn:disabled {
+  opacity: 0.45;
+  pointer-events: none;
+}
+.btn svg {
+  flex: none;
+}
+
+/* Square, borderless; for toolbars. Always carries a title (tooltip) with its shortcut. */
+.icon-btn {
+  display: inline-grid;
+  place-items: center;
+  width: var(--control-h);
+  height: var(--control-h);
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius);
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+  transition: background-color var(--motion) ease-out;
+}
+.icon-btn:hover {
+  background: var(--hover);
+}
+.icon-btn[aria-pressed="true"] {
+  background: var(--hover);
+  color: var(--text);
+}
+.icon-btn:disabled {
+  color: var(--text-dim);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.field {
+  height: var(--control-h);
+  padding: 0 var(--s2);
+  border-radius: var(--radius);
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  color: var(--text);
+  user-select: text;
+  -webkit-user-select: text;
+}
+select.field {
+  padding-right: var(--s1);
+}
+
+/* On/off switch: <button role="switch" aria-checked> */
+.switch {
+  position: relative;
+  flex: none;
+  width: 30px;
+  height: 18px;
+  padding: 0;
+  border-radius: 9px;
+  border: 1px solid var(--line-strong);
+  background: var(--raised);
+  cursor: pointer;
+  transition: background-color var(--motion) ease-out, border-color var(--motion) ease-out;
+}
+.switch::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--line-strong);
+  transition: transform var(--motion) ease-out, background-color var(--motion) ease-out;
+}
+.switch[aria-checked="true"] {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+.switch[aria-checked="true"]::after {
+  background: var(--on-accent);
+  transform: translateX(12px);
+}
+
+/* Segmented control: a radiogroup of buttons */
+.segmented {
+  display: inline-flex;
+  padding: 2px;
+  gap: 2px;
+  border-radius: var(--radius);
+  background: var(--hover);
+}
+.segmented button {
+  height: calc(var(--control-h) - 4px);
+  padding: 0 var(--s3);
+  border: 0;
+  border-radius: calc(var(--radius) - 2px);
+  background: transparent;
+  color: var(--text-dim);
+  font-weight: var(--w-medium);
+  cursor: pointer;
+}
+.segmented button[aria-checked="true"] {
+  background: var(--raised);
+  color: var(--text);
+  box-shadow: 0 0 0 1px var(--line);
+}
+
+kbd {
+  display: inline-block;
+  min-width: 20px;
+  padding: 0 5px;
+  border: 1px solid var(--line);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  background: var(--raised);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--w-medium);
+  line-height: 18px;
+  text-align: center;
+}
+
+/* Modal sheets (<dialog>) */
+dialog.sheet {
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: calc(var(--radius) + 4px);
+  background: var(--bg);
+  color: var(--text);
+  box-shadow: 0 16px 48px rgb(0 0 0 / 0.28);
+  max-width: calc(100vw - 48px);
+  max-height: calc(100vh - 48px);
+}
+dialog.sheet::backdrop {
+  background: rgb(0 0 0 / 0.32);
+}
+dialog.sheet[open] {
+  animation: sheet-in var(--motion) ease-out;
+}
+@keyframes sheet-in {
+  from {
+    opacity: 0;
+  }
+}

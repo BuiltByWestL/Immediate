@@ -1,0 +1,12 @@
+{
+  "name": "Candy",
+  "group": "Colorful",
+  "scheme": "light",
+  "tokens": {
+    "bg": "#fbf0f5", "panel": "#f7e7ef", "raised": "#fff8fb", "hover": "#f1dbe7",
+    "line": "#ebd3e0", "lineStrong": "#a47c92",
+    "text": "#3b2233", "textDim": "#78546d",
+    "accent": "#d4206f", "onAccent": "#ffffff", "focus": "#8f4fe0",
+    "danger": "#c62828", "canvas": "#e4e4e4"
+  }
+}
