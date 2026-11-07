@@ -8,7 +8,7 @@
   import { go, pickFiles, ui, updateSettings, viewer } from "../lib/app.svelte";
   import { canEdit } from "../lib/formats";
   import { beginEdit } from "../modes/image/actions";
-  import EditBar from "../modes/image/EditBar.svelte";
+  const loadEditBar = () => import("../modes/image/EditBar.svelte");
   import { editor } from "../modes/image/editor.svelte";
 
   const mod = window.__IMMEDIATE__?.platform === "macos" ? "⌘" : "Ctrl+";
@@ -17,7 +17,9 @@
 
 <header class="toolbar">
   {#if editor.active}
-    <EditBar />
+    {#await loadEditBar() then m}
+      <m.default />
+    {/await}
   {:else}
   <div class="side">
     {#if ui.file}

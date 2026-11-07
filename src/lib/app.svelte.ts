@@ -222,6 +222,17 @@ export async function copyPath() {
   }
 }
 
+/** Copies the open picture to the clipboard. */
+export async function copyImage() {
+  if (ui.file?.kind !== "image") return;
+  try {
+    await invoke("copy_image_file", { path: ui.file.path });
+    toast("Copied the picture");
+  } catch (e) {
+    toast(String(e), "error");
+  }
+}
+
 export function newWindow(files: string[] = []) {
   invoke("open_in_new_window", { files }).catch((e) => toast(String(e), "error"));
 }

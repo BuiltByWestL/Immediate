@@ -28,7 +28,10 @@ pub struct Settings {
     pub check_updates: bool,
     /// Appended to the file name by Save ("clip edited.mp4").
     pub save_suffix: String,
+    /// Remove GPS location from photos when saving.
+    pub remove_location: bool,
     pub info_open: bool,
+    pub filmstrip: bool,
 }
 
 impl Default for Settings {
@@ -44,7 +47,9 @@ impl Default for Settings {
             tint_canvas: false,
             check_updates: true,
             save_suffix: " edited".into(),
+            remove_location: false,
             info_open: false,
+            filmstrip: true,
         }
     }
 }

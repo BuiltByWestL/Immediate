@@ -10,13 +10,16 @@
   import ShortcutList from "./app/ShortcutList.svelte";
   import Toolbar from "./app/Toolbar.svelte";
   import Viewer from "./app/viewer/Viewer.svelte";
-  import ImageEditor from "./modes/image/ImageEditor.svelte";
-  import { beginEdit, cancelEdit, save } from "./modes/image/actions";
+  import Filmstrip from "./app/viewer/Filmstrip.svelte";
+  // The editor loads the first time it's opened, keeping startup light.
+  const loadEditor = () => import("./modes/image/ImageEditor.svelte");
+  import { beginEdit, cancelEdit, copyEdited, save } from "./modes/image/actions";
   import { editor, hasChanges, redo, undo } from "./modes/image/editor.svelte";
   import { canEdit } from "./lib/formats";
   import {
     ask,
     connect,
+    copyImage,
     copyPath,
     go,
     goTo,
@@ -89,6 +92,7 @@
       if (k === "z" && !e.shiftKey) undo();
       else if ((k === "z" && e.shiftKey) || k === "y") redo();
       else if (k === "s") save(e.shiftKey ? "as" : "copy");
+      else if (k === "c" && !e.shiftKey && !typing(e.target) && !window.getSelection()?.toString()) copyEdited();
       else if (["=", "+", "-", "0"].includes(k)) viewer.command?.(k === "-" ? "out" : k === "0" ? "fit" : "in");
       else if (k === ",") ui.dialog = "settings";
       else if (k === "w") getCurrentWindow().close();
@@ -113,6 +117,7 @@
       else if (k === "w") getCurrentWindow().close();
       else if (k === ",") ui.dialog = "settings";
       else if (k === "c" && e.shiftKey) copyPath();
+      else if (k === "c" && !typing(e.target) && !window.getSelection()?.toString()) copyImage();
       else if (k === "f" && e.metaKey) toggleFullscreen();
       else if (["=", "+", "-", "0"].includes(k)) viewer.command?.(k === "-" ? "out" : k === "0" ? "fit" : "in");
       else return;
@@ -153,10 +158,17 @@
   <div class="main">
     {#if ui.file && editor.active}
       {#key ui.file.path}
-        <ImageEditor file={ui.file} />
+        {#await loadEditor() then m}
+          <m.default file={ui.file} />
+        {/await}
       {/key}
     {:else if ui.file}
-      <Viewer file={ui.file} />
+      <div class="column">
+        <Viewer file={ui.file} />
+        {#if ui.settings.filmstrip && ui.list.length > 1}
+          <Filmstrip />
+        {/if}
+      </div>
       {#if ui.settings.infoOpen}
         <InfoPanel file={ui.file} />
       {/if}
@@ -200,6 +212,12 @@
     flex: 1;
     display: flex;
     min-height: 0;
+  }
+  .column {
+    flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
   }
   .confirm-body {
     color: var(--text-dim);

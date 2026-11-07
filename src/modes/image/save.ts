@@ -62,9 +62,7 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
 
   // Let the "Saving…" state paint before the (blocking) full-size render.
   await new Promise((res) => requestAnimationFrame(() => setTimeout(res)));
-  const rendered = pipeline.renderFull(edits);
-  const { w, h } = rendered;
-  const data = edits.markup.length ? withMarkup(rendered.data, w, h, edits, pipeline) : rendered.data;
+  const { data, w, h } = renderFinal(pipeline, edits);
   const options = {
     source: r.path,
     width: w,
@@ -81,6 +79,12 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
     keepIcc: r.info.colorSpace !== "other",
   };
   return invoke<string>("image_save", data, { headers: { "x-save": encodeURIComponent(JSON.stringify(options)) } });
+}
+
+/** The finished photo at full size: adjustments, geometry and markup. */
+export function renderFinal(pipeline: Pipeline, edits: Edits): { data: Uint8Array; w: number; h: number } {
+  const r = pipeline.renderFull(edits);
+  return edits.markup.length ? { ...r, data: withMarkup(r.data, r.w, r.h, edits, pipeline) } : r;
 }
 
 /** Draws the markup onto the rendered pixels at full size. */

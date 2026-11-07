@@ -107,6 +107,10 @@
             <input class="field suffix" value={s.saveSuffix} maxlength="40" spellcheck="false" onchange={(e) => set({ saveSuffix: e.currentTarget.value })} />
           </label>
           <p class="note">For example: <span class="example">{suffixExample}</span></p>
+          <div class="row">
+            <span>Remove location from saved photos</span>
+            <button type="button" class="switch" role="switch" aria-checked={s.removeLocation} aria-label="Remove location from saved photos" onclick={() => set({ removeLocation: !s.removeLocation })}></button>
+          </div>
         </section>
 
         <section>
@@ -222,6 +226,10 @@
 
         <section>
           <h3>Display</h3>
+          <div class="row">
+            <span>Show other files in the folder along the bottom</span>
+            <button type="button" class="switch" role="switch" aria-checked={s.filmstrip} aria-label="Show the filmstrip" onclick={() => set({ filmstrip: !s.filmstrip })}></button>
+          </div>
           <div class="row">
             <span>Reduce motion</span>
             <button type="button" class="switch" role="switch" aria-checked={s.reduceMotion} aria-label="Reduce motion" onclick={() => set({ reduceMotion: !s.reduceMotion })}></button>

@@ -11,6 +11,7 @@ export const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
       [[MOD, "W"], "Close window"],
       [["←", "→"], "Previous / next file in the folder"],
       [["Home", "End"], "First / last file"],
+      [[MOD, "C"], "Copy the picture"],
       [[MOD, "Shift", "C"], "Copy the file’s location"],
     ],
   },

@@ -3,7 +3,20 @@
 import { invoke } from "@tauri-apps/api/core";
 import { ask, openPaths, toast, ui } from "../../lib/app.svelte";
 import { editor, hasChanges, session, startEditing, stopEditing } from "./editor.svelte";
-import { saveImage, type SaveTarget } from "./save";
+import { renderFinal, saveImage, type SaveTarget } from "./save";
+
+/** Copies the edited photo to the clipboard. */
+export async function copyEdited() {
+  const p = session.pipeline;
+  if (!p || !editor.ready) return;
+  try {
+    const { data, w, h } = renderFinal(p, editor.edits);
+    await invoke("copy_pixels", data, { headers: { "x-size": `${w},${h}` } });
+    toast("Copied the edited picture");
+  } catch (e) {
+    toast(String(e), "error");
+  }
+}
 
 export function beginEdit() {
   if (!ui.file || ui.file.kind !== "image") return;
@@ -55,7 +68,7 @@ export async function save(target: SaveTarget) {
       info,
       target,
       suffix: ui.settings.saveSuffix,
-      stripLocation: false,
+      stripLocation: ui.settings.removeLocation,
       stripMetadata: false,
     });
     if (!saved) return;

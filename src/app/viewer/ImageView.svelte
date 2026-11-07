@@ -2,7 +2,7 @@
   // Photo viewer: fit to window (never enlarged past 100 %), wheel or pinch zooms around the
   // pointer, drag pans, double-click toggles fit / actual size. The previous photo stays on
   // screen until the next one is decoded, so ←/→ never flashes.
-  import { convertFileSrc } from "@tauri-apps/api/core";
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import { ui, viewer } from "../../lib/app.svelte";
   import { decodeWithRust } from "../../lib/pixels";
@@ -106,13 +106,26 @@
   }
 
   let last = { x: 0, y: 0 };
+  // When the whole picture fits there's nothing to pan, so dragging takes the file out of the
+  // window instead (into Explorer, Finder, a chat…).
+  let dragOut: { x: number; y: number; id: number } | null = null;
+
   function onpointerdown(e: PointerEvent) {
     if (e.button !== 0) return;
+    if (!canPan && ui.file) {
+      dragOut = { x: e.clientX, y: e.clientY, id: e.pointerId };
+      return;
+    }
     dragging = true;
     last = { x: e.clientX, y: e.clientY };
     box.setPointerCapture(e.pointerId);
   }
   function onpointermove(e: PointerEvent) {
+    if (dragOut && ui.file && Math.hypot(e.clientX - dragOut.x, e.clientY - dragOut.y) > 6) {
+      dragOut = null;
+      invoke("start_drag", { path: ui.file.path }).catch(() => {});
+      return;
+    }
     if (!dragging) return;
     tx += e.clientX - last.x;
     ty += e.clientY - last.y;
@@ -122,6 +135,7 @@
   }
   function onpointerup() {
     dragging = false;
+    dragOut = null;
   }
   function ondblclick(e: MouseEvent) {
     const r = box.getBoundingClientRect();
@@ -170,6 +184,7 @@
 <div
   class="box"
   class:grab={canPan}
+  title={canPan ? undefined : "Drag the picture into another app to share it"}
   class:dragging
   bind:this={box}
   {onwheel}

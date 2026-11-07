@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { invoke } from "@tauri-apps/api/core";
   import Copy from "@lucide/svelte/icons/copy";
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import { copyPath, revealCurrent, ui } from "../lib/app.svelte";
@@ -6,6 +7,7 @@
   import type { OpenedFile } from "../lib/types";
 
   let { file }: { file: OpenedFile } = $props();
+  let down: { x: number; y: number } | null = null;
 
   const rows = $derived.by(() => {
     const f = ui.facts;
@@ -31,7 +33,21 @@
 
 <aside class="panel" aria-label="File info">
   <section>
-    <h2 class="title">{file.name}</h2>
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <h2
+      class="title"
+      title="Drag into another app to share this file"
+      onpointerdown={(e) => (down = e.button === 0 ? { x: e.clientX, y: e.clientY } : null)}
+      onpointermove={(e) => {
+        if (down && Math.hypot(e.clientX - down.x, e.clientY - down.y) > 5) {
+          down = null;
+          invoke("start_drag", { path: file.path }).catch(() => {});
+        }
+      }}
+      onpointerup={() => (down = null)}
+    >
+      {file.name}
+    </h2>
     <p class="folder dim" title={file.dir}>{file.dir}</p>
   </section>
 
@@ -82,6 +98,7 @@
     border-bottom: 0;
   }
   .title {
+    cursor: grab;
     font-size: var(--text-md);
     font-weight: var(--w-medium);
     overflow-wrap: anywhere;

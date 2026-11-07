@@ -4,6 +4,8 @@
   import Redo from "@lucide/svelte/icons/redo-2";
   import Undo from "@lucide/svelte/icons/undo-2";
   import SplitSquare from "@lucide/svelte/icons/square-split-horizontal";
+  import Check from "@lucide/svelte/icons/check";
+  import { ui, updateSettings } from "../../lib/app.svelte";
   import { MOD } from "../../lib/shortcuts";
   import { cancelEdit, save } from "./actions";
   import { editor, redo, undo } from "./editor.svelte";
@@ -71,6 +73,19 @@
         <button type="button" role="menuitem" onclick={() => pick("replace")}>
           <span>Replace original…</span>
         </button>
+        <div class="sep"></div>
+        <button
+          type="button"
+          role="menuitemcheckbox"
+          aria-checked={ui.settings.removeLocation}
+          onclick={(e) => {
+            e.stopPropagation();
+            updateSettings({ removeLocation: !ui.settings.removeLocation });
+          }}
+        >
+          <span>Remove location</span>
+          {#if ui.settings.removeLocation}<Check size={15} strokeWidth={1.75} />{/if}
+        </button>
       </div>
     {/if}
   </div>
@@ -130,5 +145,13 @@
   }
   .menu button:hover {
     background: var(--hover);
+  }
+  .menu button {
+    align-items: center;
+  }
+  .sep {
+    height: 1px;
+    margin: var(--s1) 0;
+    background: var(--line);
   }
 </style>

@@ -11,7 +11,9 @@ export interface Settings {
   tintCanvas: boolean;
   checkUpdates: boolean;
   saveSuffix: string;
+  removeLocation: boolean;
   infoOpen: boolean;
+  filmstrip: boolean;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -25,7 +27,9 @@ export const DEFAULT_SETTINGS: Settings = {
   tintCanvas: false,
   checkUpdates: true,
   saveSuffix: " edited",
+  removeLocation: false,
   infoOpen: false,
+  filmstrip: true,
 };
 
 export type Kind = "image" | "video" | "audio";

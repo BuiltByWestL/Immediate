@@ -3,6 +3,7 @@
 
 pub mod decode;
 pub mod meta;
+pub mod thumb;
 
 use std::io::Cursor;
 use std::path::{Path, PathBuf};
@@ -110,6 +111,83 @@ pub async fn decode_image(path: String) -> Result<tauri::ipc::Response, String> 
     out.extend(img.h.to_le_bytes());
     out.extend(img.data);
     Ok(tauri::ipc::Response::new(out))
+}
+
+/// A small PNG preview of any file (picture, video…) for the filmstrip.
+#[tauri::command]
+pub async fn thumbnail(path: String, size: u32) -> Result<tauri::ipc::Response, String> {
+    let png = tauri::async_runtime::spawn_blocking(move || thumb::thumbnail(Path::new(&path), size.clamp(16, 512)))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(tauri::ipc::Response::new(png))
+}
+
+/// Starts dragging a file out of the window (into Explorer, Finder, a chat, an email…).
+#[tauri::command]
+pub async fn start_drag<R: Runtime>(app: AppHandle<R>, window: tauri::Window<R>, path: String) -> Result<(), String> {
+    let p = PathBuf::from(&path);
+    let icon = tauri::async_runtime::spawn_blocking({
+        let p = p.clone();
+        move || thumb::thumbnail(&p, 96).ok()
+    })
+    .await
+    .ok()
+    .flatten()
+    .unwrap_or_default();
+    app.run_on_main_thread(move || {
+        let item = drag::DragItem::Files(vec![p]);
+        let image = drag::Image::Raw(icon);
+        #[cfg(target_os = "linux")]
+        if let Ok(gw) = window.gtk_window() {
+            let _ = drag::start_drag(&gw, item, image, |_, _| {}, drag::Options::default());
+        }
+        #[cfg(not(target_os = "linux"))]
+        let _ = drag::start_drag(&window, item, image, |_, _| {}, drag::Options::default());
+    })
+    .map_err(|e| e.to_string())
+}
+
+/// The clipboard stays open for the life of the app: on Linux, copied data lives only as long
+/// as its owner.
+static CLIPBOARD: std::sync::Mutex<Option<arboard::Clipboard>> = std::sync::Mutex::new(None);
+
+fn set_clipboard_image(w: u32, h: u32, rgba: Vec<u8>) -> Result<(), String> {
+    let mut guard = CLIPBOARD.lock().map_err(|e| e.to_string())?;
+    if guard.is_none() {
+        *guard = Some(arboard::Clipboard::new().map_err(|e| e.to_string())?);
+    }
+    let cb = guard.as_mut().unwrap();
+    cb.set_image(arboard::ImageData { width: w as usize, height: h as usize, bytes: rgba.into() })
+        .map_err(|e| format!("Couldn’t copy the picture: {e}"))
+}
+
+/// Copies a picture file's pixels to the clipboard (for pasting into chats, documents…).
+#[tauri::command]
+pub async fn copy_image_file(path: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        let img = decode::decode(Path::new(&path))?;
+        set_clipboard_image(img.w, img.h, img.data)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Copies edited pixels (request body, RGBA; header "x-size": "w,h") to the clipboard.
+#[tauri::command]
+pub async fn copy_pixels(request: Request<'_>) -> Result<(), String> {
+    let (w, h) = request
+        .headers()
+        .get("x-size")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split_once(','))
+        .and_then(|(a, b)| Some((a.parse::<u32>().ok()?, b.parse::<u32>().ok()?)))
+        .ok_or("missing size")?;
+    let InvokeBody::Raw(rgba) = request.body() else { return Err("missing pixels".into()) };
+    if rgba.len() != w as usize * h as usize * 4 {
+        return Err("the image data is incomplete".into());
+    }
+    let rgba = rgba.clone();
+    tauri::async_runtime::spawn_blocking(move || set_clipboard_image(w, h, rgba)).await.map_err(|e| e.to_string())?
 }
 
 #[derive(Deserialize)]
