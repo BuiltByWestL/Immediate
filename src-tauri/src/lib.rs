@@ -1,3 +1,5 @@
+mod update;
+
 use std::sync::{Mutex, OnceLock};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
@@ -67,8 +69,11 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(update::PendingUpdate::default())
         .setup(|app| {
             mark("setup");
+            update::run_test_hook(app.handle());
             // Show a plain native window right away, painted in the theme's background color,
             // then attach the webview. On Windows, WebView2 needs ~250 ms to start its browser
             // process; without this split nothing would be on screen during that time.
@@ -102,7 +107,11 @@ pub fn run() {
             PageLoadEvent::Started => mark("pageStarted"),
             PageLoadEvent::Finished => mark("pageFinished"),
         })
-        .invoke_handler(tauri::generate_handler![app_ready])
+        .invoke_handler(tauri::generate_handler![
+            app_ready,
+            update::update_check,
+            update::update_install
+        ])
         .run(tauri::generate_context!())
         .expect("error while running Immediate");
 }

@@ -1,6 +1,10 @@
 <script lang="ts">
+  import UpdateBar from "./app/UpdateBar.svelte";
+
   let dragging = $state(false);
 </script>
+
+<UpdateBar />
 
 <main
   class="empty"

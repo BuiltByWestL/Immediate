@@ -1,6 +1,6 @@
 [package]
 name = "immediate"
-version = "0.1.0"
+version = "0.1.1"
 description = "Open any media file, make a quick edit, save a file."
 authors = ["BuiltByWestL"]
 license = "MIT"
@@ -34,3 +34,6 @@ lto = true
 opt-level = 3
 panic = "abort"
 strip = true
+
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-updater = "2"

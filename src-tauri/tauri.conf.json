@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Immediate",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "identifier": "com.builtbywestl.immediate",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -15,9 +15,21 @@
       "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost blob: data:; media-src 'self' asset: http://asset.localhost blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src ipc: http://ipc.localhost"
     }
   },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDE4MjIyRTFBQUQ1NjI0NjEKUldSaEpGYXRHaTRpR0NxbCsxblNmcWhEcmJVZ0Q3Q3RFcnp3dlhMQmJjQUVKSlA0Tjd5MkVnRDQK",
+      "endpoints": [
+        "https://raw.githubusercontent.com/BuiltByWestL/Immediate/updates/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
   "bundle": {
     "active": true,
     "targets": ["nsis"],
+    "createUpdaterArtifacts": true,
     "publisher": "BuiltByWestL",
     "shortDescription": "Open any media file, make a quick edit, save a file.",
     "category": "Photography",
