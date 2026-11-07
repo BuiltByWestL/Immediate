@@ -5,11 +5,14 @@
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
   import { ui, viewer } from "../../lib/app.svelte";
+  import { decodeWithRust } from "../../lib/pixels";
 
-  let { path, onfail }: { path: string; onfail: (msg: string) => void } = $props();
+  /** `rust`: the webview can't decode this format; Immediate's own decoder does. */
+  let { path, rust = false, onfail }: { path: string; rust?: boolean; onfail: (msg: string) => void } = $props();
 
   let box: HTMLDivElement;
-  let shown = $state<{ src: string; w: number; h: number } | null>(null);
+  /** What's on screen: an <img> URL, or decoded pixels drawn into a canvas. */
+  let shown = $state.raw<{ src?: string; pixels?: ImageData; w: number; h: number } | null>(null);
   let scale = $state(1);
   let tx = $state(0);
   let ty = $state(0);
@@ -53,8 +56,23 @@
   }
 
   $effect(() => {
-    const src = convertFileSrc(path);
     let cancelled = false;
+    if (rust) {
+      ui.loading = true;
+      decodeWithRust(path)
+        .then((pixels) => {
+          if (cancelled) return;
+          shown = { pixels, w: pixels.width, h: pixels.height };
+          ui.facts = { width: pixels.width, height: pixels.height };
+          fit();
+        })
+        .catch((e) => !cancelled && onfail(String(e)))
+        .finally(() => !cancelled && (ui.loading = false));
+      return () => {
+        cancelled = true;
+      };
+    }
+    const src = convertFileSrc(path);
     const img = new Image();
     img.decoding = "async";
     img.src = src;
@@ -134,6 +152,17 @@
     };
   });
 
+  /** Draws decoded pixels into the canvas at full size (the view scales it with CSS). */
+  function paint(canvas: HTMLCanvasElement, pixels: ImageData) {
+    const draw = (p: ImageData) => {
+      canvas.width = p.width;
+      canvas.height = p.height;
+      canvas.getContext("2d")!.putImageData(p, 0, 0);
+    };
+    draw(pixels);
+    return { update: draw };
+  }
+
   const canPan = $derived(shown ? shown.w * scale > bw + 0.5 || shown.h * scale > bh + 0.5 : false);
 </script>
 
@@ -150,7 +179,15 @@
   onpointercancel={onpointerup}
   {ondblclick}
 >
-  {#if shown}
+  {#if shown?.pixels}
+    <canvas
+      use:paint={shown.pixels}
+      class:pixelated={scale >= 3}
+      style:width="{shown.w}px"
+      style:height="{shown.h}px"
+      style:transform="translate({tx}px, {ty}px) scale({scale})"
+    ></canvas>
+  {:else if shown?.src}
     <img
       src={shown.src}
       alt={ui.file?.name ?? ""}
@@ -176,7 +213,8 @@
   .dragging {
     cursor: grabbing;
   }
-  img {
+  img,
+  canvas {
     position: absolute;
     left: 0;
     top: 0;

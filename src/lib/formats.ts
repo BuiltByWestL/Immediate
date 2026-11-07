@@ -17,11 +17,21 @@ const NATIVE: Record<string, Set<string>> = {
   audio: new Set(["mp3", "wav", "bwf", "flac", "aac", "m4a", "m4b", "ogg", "oga", "opus"]),
 };
 
-export function canPreview(f: OpenedFile): boolean {
-  return NATIVE[f.kind]?.has(f.ext) ?? false;
+/** Pictures Immediate decodes itself (src-tauri/src/image/decode.rs). */
+const DECODED = new Set([
+  "tif", "tiff", "tga", "pnm", "ppm", "pgm", "pbm", "qoi", "hdr", "exr", "dds", "psd", "psb", "jxl", "heic", "heif",
+  "dng", "cr2", "cr3", "nef", "nrw", "arw", "srf", "sr2", "orf", "rw2", "raf", "pef", "srw", "3fr", "iiq",
+]);
+
+export function needsDecoding(f: OpenedFile): boolean {
+  return f.kind === "image" && !NATIVE.image.has(f.ext) && DECODED.has(f.ext);
 }
 
-/** Photos the editor can open (P2: those the webview decodes; more formats come with Rust decoders). */
+export function canPreview(f: OpenedFile): boolean {
+  return (NATIVE[f.kind]?.has(f.ext) ?? false) || needsDecoding(f);
+}
+
+/** Pictures the editor opens (vector and icon files are view only). */
 export function canEdit(f: OpenedFile): boolean {
   return f.kind === "image" && f.ext !== "svg" && f.ext !== "ico" && canPreview(f);
 }

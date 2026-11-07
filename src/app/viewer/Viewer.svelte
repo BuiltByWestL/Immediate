@@ -1,6 +1,6 @@
 <script lang="ts">
   import { ui } from "../../lib/app.svelte";
-  import { canPreview } from "../../lib/formats";
+  import { canPreview, needsDecoding } from "../../lib/formats";
   import type { OpenedFile } from "../../lib/types";
   import ImageView from "./ImageView.svelte";
   import MediaView from "./MediaView.svelte";
@@ -23,7 +23,7 @@
   {#if unsupported || failed}
     <NoPreview {file} reason={(unsupported ?? failed)!} />
   {:else if file.kind === "image"}
-    <ImageView path={file.path} onfail={fail(file.path)} />
+    <ImageView path={file.path} rust={needsDecoding(file)} onfail={fail(file.path)} />
   {:else}
     {#key file.path}
       <MediaView {file} onfail={fail(file.path)} />

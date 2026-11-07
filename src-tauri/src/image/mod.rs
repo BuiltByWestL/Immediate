@@ -1,6 +1,7 @@
 //! Saving edited photos. The UI renders the edited pixels at full resolution and sends them here;
 //! Rust encodes them in the original's format and quality and carries its metadata over.
 
+pub mod decode;
 pub mod meta;
 
 use std::io::Cursor;
@@ -95,6 +96,20 @@ pub async fn image_info(path: String) -> Result<ImageInfo, String> {
     }
     let fmt = save_format(&ext);
     Ok(ImageInfo { icc_name, color_space, save_format: fmt, save_ext: ext_for(fmt, &ext), jpeg_quality, lossless })
+}
+
+/// Decodes a picture the webview can't show itself. Returns width and height (u32 LE each),
+/// then upright sRGB RGBA pixels.
+#[tauri::command]
+pub async fn decode_image(path: String) -> Result<tauri::ipc::Response, String> {
+    let img = tauri::async_runtime::spawn_blocking(move || decode::decode(Path::new(&path)))
+        .await
+        .map_err(|e| e.to_string())??;
+    let mut out = Vec::with_capacity(8 + img.data.len());
+    out.extend(img.w.to_le_bytes());
+    out.extend(img.h.to_le_bytes());
+    out.extend(img.data);
+    Ok(tauri::ipc::Response::new(out))
 }
 
 #[derive(Deserialize)]

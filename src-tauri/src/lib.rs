@@ -117,6 +117,7 @@ pub fn run() {
             files::clipboard_paste,
             files::reveal,
             image::image_info,
+            image::decode_image,
             image::image_save,
             settings::settings_get,
             settings::settings_set,

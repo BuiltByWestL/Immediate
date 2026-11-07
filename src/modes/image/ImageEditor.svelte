@@ -1,6 +1,8 @@
 <script lang="ts">
   // The photo editor: a WebGL canvas showing the edited photo live, and the inspector panel.
-  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
+  import { invoke } from "@tauri-apps/api/core";
+  import { needsDecoding } from "../../lib/formats";
+  import { loadBitmap } from "../../lib/pixels";
   import { onMount } from "svelte";
   import { viewer } from "../../lib/app.svelte";
   import type { OpenedFile } from "../../lib/types";
@@ -96,19 +98,19 @@
     try {
       const info = await invoke<ImageInfo>("image_info", { path: file.path });
       session.info = info;
-      const blob = await (await fetch(convertFileSrc(file.path))).blob();
       // Pixels stay in the photo's own color space (sRGB or Display P3, drawn as such), so
       // nothing shifts on save. Other profiles are converted to sRGB.
       const opts: ImageBitmapOptions = {
-        imageOrientation: "from-image",
-        premultiplyAlpha: "none",
         colorSpaceConversion: info.colorSpace === "other" ? "default" : "none",
       };
-      let bmp = await createImageBitmap(blob, opts);
+      const rust = needsDecoding(file);
+      let bmp = await loadBitmap(file.path, rust, opts);
       pipeline = new Pipeline(canvas, info.colorSpace === "display-p3" ? "display-p3" : "srgb");
       if (bmp.width > pipeline.maxSize || bmp.height > pipeline.maxSize) {
         const k = pipeline.maxSize / Math.max(bmp.width, bmp.height);
-        bmp = await createImageBitmap(blob, { ...opts, resizeWidth: Math.floor(bmp.width * k), resizeHeight: Math.floor(bmp.height * k), resizeQuality: "high" });
+        const full = bmp;
+        bmp = await createImageBitmap(full, { resizeWidth: Math.floor(full.width * k), resizeHeight: Math.floor(full.height * k), resizeQuality: "high" });
+        full.close();
       }
       pipeline.setSource(bmp, { w: bmp.width, h: bmp.height });
       bmp.close();
