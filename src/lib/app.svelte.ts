@@ -32,7 +32,30 @@ export const ui = $state({
   settingsSection: "general",
   dropping: false,
   toasts: [] as Toast[],
+  confirm: null as null | Confirm,
 });
+
+export interface Confirm {
+  title: string;
+  body: string;
+  ok: string;
+  cancel: string;
+  danger?: boolean;
+  resolve: (ok: boolean) => void;
+}
+
+/** Asks a yes/no question in a small sheet. Resolves true for `ok`. */
+export function ask(q: Omit<Confirm, "resolve">): Promise<boolean> {
+  return new Promise((resolve) => {
+    ui.confirm = {
+      ...q,
+      resolve: (ok) => {
+        ui.confirm = null;
+        resolve(ok);
+      },
+    };
+  });
+}
 
 /** The active viewer's controls, for the toolbar and keyboard shortcuts. */
 export const viewer = $state({

@@ -26,6 +26,18 @@ export const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
     ],
   },
   {
+    group: "Editing photos",
+    items: [
+      [["E"], "Edit"],
+      [[MOD, "S"], "Save a copy next to the original"],
+      [[MOD, "Shift", "S"], "Save As"],
+      [[MOD, "Z"], "Undo"],
+      [[MOD, "Shift", "Z"], "Redo"],
+      [["\\"], "Hold to compare with the original"],
+      [["Esc"], "Cancel editing"],
+    ],
+  },
+  {
     group: "App",
     items: [
       [[MOD, ","], "Settings"],

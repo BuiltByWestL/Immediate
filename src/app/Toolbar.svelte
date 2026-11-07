@@ -4,13 +4,21 @@
   import FolderOpen from "@lucide/svelte/icons/folder-open";
   import Info from "@lucide/svelte/icons/info";
   import Settings from "@lucide/svelte/icons/settings";
+  import SlidersHorizontal from "@lucide/svelte/icons/sliders-horizontal";
   import { go, pickFiles, ui, updateSettings, viewer } from "../lib/app.svelte";
+  import { canEdit } from "../lib/formats";
+  import { beginEdit } from "../modes/image/actions";
+  import EditBar from "../modes/image/EditBar.svelte";
+  import { editor } from "../modes/image/editor.svelte";
 
   const mod = window.__IMMEDIATE__?.platform === "macos" ? "⌘" : "Ctrl+";
   const zoomText = $derived(viewer.zoom == null ? "" : `${Math.round(viewer.zoom * 100)}%`);
 </script>
 
 <header class="toolbar">
+  {#if editor.active}
+    <EditBar />
+  {:else}
   <div class="side">
     {#if ui.file}
       <button type="button" class="icon-btn" title="Previous (←)" aria-label="Previous file" disabled={ui.index <= 0} onclick={() => go(-1)}>
@@ -52,7 +60,13 @@
     <button type="button" class="icon-btn" title="Settings ({mod},)" aria-label="Settings" onclick={() => (ui.dialog = "settings")}>
       <Settings size={17} strokeWidth={1.5} />
     </button>
+    {#if ui.file && canEdit(ui.file)}
+      <button type="button" class="btn primary edit" title="Edit (E)" onclick={beginEdit}>
+        <SlidersHorizontal size={15} strokeWidth={1.75} />Edit
+      </button>
+    {/if}
   </div>
+  {/if}
 </header>
 
 <style>
@@ -74,6 +88,9 @@
   }
   .end {
     justify-content: flex-end;
+  }
+  .edit {
+    margin-left: var(--s2);
   }
   .count {
     margin-left: var(--s2);

@@ -137,7 +137,8 @@ select.field {
   font-weight: var(--w-medium);
   cursor: pointer;
 }
-.segmented button[aria-checked="true"] {
+.segmented button[aria-checked="true"],
+.segmented button[aria-selected="true"] {
   background: var(--raised);
   color: var(--text);
   box-shadow: 0 0 0 1px var(--line);
@@ -168,6 +169,9 @@ dialog.sheet {
   box-shadow: 0 16px 48px rgb(0 0 0 / 0.28);
   max-width: calc(100vw - 48px);
   max-height: calc(100vh - 48px);
+}
+dialog.sheet:focus-visible {
+  outline: none;
 }
 dialog.sheet::backdrop {
   background: rgb(0 0 0 / 0.32);

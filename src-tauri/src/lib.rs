@@ -1,6 +1,7 @@
 mod chrome;
 mod files;
 mod formats;
+mod image;
 mod settings;
 mod themes;
 mod tools;
@@ -115,6 +116,8 @@ pub fn run() {
             files::file_details,
             files::clipboard_paste,
             files::reveal,
+            image::image_info,
+            image::image_save,
             settings::settings_get,
             settings::settings_set,
             themes::themes_custom,

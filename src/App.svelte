@@ -10,7 +10,12 @@
   import ShortcutList from "./app/ShortcutList.svelte";
   import Toolbar from "./app/Toolbar.svelte";
   import Viewer from "./app/viewer/Viewer.svelte";
+  import ImageEditor from "./modes/image/ImageEditor.svelte";
+  import { beginEdit, cancelEdit, save } from "./modes/image/actions";
+  import { editor, hasChanges, redo, undo } from "./modes/image/editor.svelte";
+  import { canEdit } from "./lib/formats";
   import {
+    ask,
     connect,
     copyPath,
     go,
@@ -37,11 +42,31 @@
       else if (p.type === "leave") ui.dropping = false;
       else if (p.type === "drop") {
         ui.dropping = false;
-        openPaths(p.paths);
+        // Never throw away edits: files dropped on a window with edits open in a new window.
+        if (hasChanges()) newWindow(p.paths);
+        else {
+          if (editor.active) cancelEdit();
+          openPaths(p.paths);
+        }
       }
+    });
+    // Closing a window with unsaved edits asks first.
+    const win = getCurrentWindow();
+    const unclose = win.onCloseRequested(async (e) => {
+      if (!hasChanges()) return;
+      e.preventDefault();
+      const ok = await ask({
+        title: "Close without saving?",
+        body: "Your edits to this photo will be lost.",
+        ok: "Close",
+        cancel: "Keep editing",
+        danger: true,
+      });
+      if (ok) win.destroy();
     });
     return () => {
       unlisten.then((f) => f());
+      unclose.then((f) => f());
     };
   });
 
@@ -58,6 +83,28 @@
     const mod = e.ctrlKey || e.metaKey;
     const key = e.key;
 
+    if (ui.confirm) return;
+    if (mod && editor.active) {
+      const k = key.toLowerCase();
+      if (k === "z" && !e.shiftKey) undo();
+      else if ((k === "z" && e.shiftKey) || k === "y") redo();
+      else if (k === "s") save(e.shiftKey ? "as" : "copy");
+      else if (["=", "+", "-", "0"].includes(k)) viewer.command?.(k === "-" ? "out" : k === "0" ? "fit" : "in");
+      else if (k === ",") ui.dialog = "settings";
+      else if (k === "w") getCurrentWindow().close();
+      else return;
+      e.preventDefault();
+      return;
+    }
+    if (editor.active && !ui.dialog && !typing(e.target)) {
+      if (key === "\\") editor.comparing = true;
+      else if (key === "Escape") cancelEdit();
+      else if (key === "0") viewer.command?.("fit");
+      else if (key === "1") viewer.command?.("actual");
+      else return;
+      e.preventDefault();
+      return;
+    }
     if (mod) {
       const k = key.toLowerCase();
       if (k === "o") pickFiles();
@@ -87,6 +134,7 @@
     else if (key === " " && viewer.media && !onMedia) {
       viewer.media.paused ? viewer.media.play() : viewer.media.pause();
     } else if (key.toLowerCase() === "i" && ui.file) updateSettings({ infoOpen: !ui.settings.infoOpen });
+    else if (key.toLowerCase() === "e" && ui.file && canEdit(ui.file)) beginEdit();
     else if (key === "?") ui.dialog = "shortcuts";
     else if (key === "F11") toggleFullscreen();
     else if (key === "Escape") getCurrentWindow().setFullscreen(false);
@@ -95,12 +143,19 @@
   }
 </script>
 
-<svelte:window {onkeydown} oncontextmenu={(e) => !typing(e.target) && e.preventDefault()} />
+<svelte:window
+  {onkeydown}
+  onkeyup={(e) => e.key === "\\" && (editor.comparing = false)}
+  oncontextmenu={(e) => !typing(e.target) && e.preventDefault()} />
 
 <div class="app">
   <Toolbar />
   <div class="main">
-    {#if ui.file}
+    {#if ui.file && editor.active}
+      {#key ui.file.path}
+        <ImageEditor file={ui.file} />
+      {/key}
+    {:else if ui.file}
       <Viewer file={ui.file} />
       {#if ui.settings.infoOpen}
         <InfoPanel file={ui.file} />
@@ -113,6 +168,17 @@
 
 <DropOverlay />
 <Notices />
+
+{#if ui.confirm}
+  {@const c = ui.confirm}
+  <Sheet title={c.title} width={400} onclose={() => c.resolve(false)}>
+    <p class="confirm-body">{c.body}</p>
+    <div class="confirm-actions">
+      <button type="button" class="btn lg" onclick={() => c.resolve(false)}>{c.cancel}</button>
+      <button type="button" class="btn lg primary" class:danger={c.danger} onclick={() => c.resolve(true)}>{c.ok}</button>
+    </div>
+  </Sheet>
+{/if}
 
 {#if ui.dialog === "settings"}
   {#await loadSettings() then m}
@@ -134,5 +200,22 @@
     flex: 1;
     display: flex;
     min-height: 0;
+  }
+  .confirm-body {
+    color: var(--text-dim);
+  }
+  .confirm-actions {
+    display: flex;
+    justify-content: flex-end;
+    gap: var(--s2);
+    margin-top: var(--s5);
+  }
+  .danger {
+    background: var(--danger);
+    border-color: var(--danger);
+    color: #fff;
+  }
+  :global([data-scheme="dark"]) .danger {
+    color: #161616;
   }
 </style>

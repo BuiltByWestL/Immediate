@@ -3,6 +3,12 @@ import { invoke } from "@tauri-apps/api/core";
 import "./design/tokens.css";
 import "./design/controls.css";
 import App from "./App.svelte";
+import { toast } from "./lib/app.svelte";
+
+// Anything unexpected is shown, in plain words, instead of failing silently.
+const report = (e: unknown) => toast(`Something went wrong: ${e instanceof Error ? e.message : String(e)}`, "error");
+window.addEventListener("error", (e) => report(e.error ?? e.message));
+window.addEventListener("unhandledrejection", (e) => report(e.reason));
 
 const scriptStart = performance.timeOrigin + performance.now();
 

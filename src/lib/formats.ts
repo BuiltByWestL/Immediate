@@ -21,6 +21,11 @@ export function canPreview(f: OpenedFile): boolean {
   return NATIVE[f.kind]?.has(f.ext) ?? false;
 }
 
+/** Photos the editor can open (P2: those the webview decodes; more formats come with Rust decoders). */
+export function canEdit(f: OpenedFile): boolean {
+  return f.kind === "image" && f.ext !== "svg" && f.ext !== "ico" && canPreview(f);
+}
+
 export function isNativeImagePath(path: string): boolean {
   const ext = path.split(".").pop()?.toLowerCase() ?? "";
   return NATIVE.image.has(ext);
