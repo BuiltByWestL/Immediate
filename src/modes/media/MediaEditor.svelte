@@ -136,7 +136,8 @@
 
   // Live sound: volume, fades, loudness, tone and leveling are heard while playing, through Web
   // Audio nodes that follow the filters used when saving. Only noise reduction is save-only.
-  let audio: { ctx: AudioContext; gain: GainNode; fade: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode } | null = null;
+  type LiveAudio = { ctx: AudioContext; gain: GainNode; fade: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode };
+  let audio = $state.raw<LiveAudio | null>(null);
 
   /** Fade level at source time t, measured along the kept parts like the saved file. */
   function fadeAt(t: number) {
@@ -207,12 +208,17 @@
     if (media.edit.compress) audio.out.connect(audio.comp).connect(audio.ctx.destination);
     else audio.out.connect(audio.ctx.destination);
   }
+  // Follow every sound setting while playing. Read them all before checking `audio`, so the
+  // effect subscribes to each one (an early return would leave it deaf to slider moves).
   $effect(() => {
-    const e = media.edit;
-    if (!audio) return;
-    audio.gain.gain.setTargetAtTime(Math.pow(10, liveGainDb / 20), audio.ctx.currentTime, 0.02);
-    e.eq.forEach((g, i) => (audio!.eq[i].gain.value = g));
-    void e.compress;
+    const gain = Math.pow(10, liveGainDb / 20);
+    const eq = [...media.edit.eq];
+    const compress = media.edit.compress;
+    const a = audio;
+    if (!a) return;
+    a.gain.gain.setTargetAtTime(gain, a.ctx.currentTime, 0.02);
+    eq.forEach((g, i) => a.eq[i].gain.setTargetAtTime(g, a.ctx.currentTime, 0.02));
+    void compress;
     routeCompressor();
   });
   $effect(() => () => audio?.ctx.close());
