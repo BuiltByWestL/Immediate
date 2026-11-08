@@ -15,7 +15,16 @@ use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
+use super::convert::{self, Crop};
 use crate::files::unique_path;
+
+fn one() -> f64 {
+    1.0
+}
+
+fn yes() -> bool {
+    true
+}
 
 // Tone bands, where laptop and phone speakers can play them (MediaEditor.svelte uses the same).
 const BASS_HZ: u32 = 200;
@@ -57,6 +66,30 @@ pub struct ExportRequest {
     /// Gentle compressor that evens out loud and quiet parts.
     #[serde(default)]
     compress: bool,
+    /// Picture: clockwise turn in degrees (0/90/180/270), mirror, crop of the turned picture.
+    #[serde(default)]
+    rotate: u32,
+    #[serde(default)]
+    flip: bool,
+    #[serde(default)]
+    crop: Option<Crop>,
+    /// Playback speed of the result (1 = unchanged; 0.25–4).
+    #[serde(default = "one")]
+    speed: f64,
+    /// With a speed change: keep the pitch (true), or let it follow like a tape (false).
+    #[serde(default = "yes")]
+    keep_pitch: bool,
+    /// Which audio and subtitle tracks to keep, by their order in the file (missing = keep).
+    #[serde(default)]
+    keep_audio: Vec<bool>,
+    #[serde(default)]
+    keep_subs: Vec<bool>,
+    /// A subtitle file (.srt, .vtt, .ass) to add as a track, retimed to the kept parts.
+    #[serde(default)]
+    subtitle_file: Option<String>,
+    /// "" (the edited file), "audio" (the sound only) or "gif" (an animated GIF, no sound).
+    #[serde(default)]
+    output: String,
     /// "copy" | "replace" | "path"
     target: String,
     dest: Option<String>,
@@ -294,10 +327,11 @@ fn is_pcm_or_lossless(codec: &str) -> bool {
     codec.starts_with("pcm_") || matches!(codec, "flac" | "alac")
 }
 
-/// Encoder settings that reproduce the source stream as closely as possible.
-fn video_settings(v: &Value, probe: &Value, out_index: usize) -> Vec<String> {
+/// Encoder settings that reproduce the source stream as closely as possible (with `enc`, in
+/// another codec the new container can hold).
+fn video_settings(v: &Value, probe: &Value, out_index: usize, enc: Option<&'static str>) -> Vec<String> {
     let codec = v["codec_name"].as_str().unwrap_or("h264");
-    let enc = video_encoder(codec);
+    let enc = enc.unwrap_or_else(|| video_encoder(codec));
     let mut a = vec![format!("-c:v:{out_index}"), enc.into()];
     let br = num(&v["bit_rate"]).or_else(|| {
         // Container bitrate minus the audio, when the stream doesn't say.
@@ -325,6 +359,10 @@ fn video_settings(v: &Value, probe: &Value, out_index: usize) -> Vec<String> {
     }
     if enc == "libsvtav1" {
         a.extend(["-preset".into(), "8".into()]);
+    }
+    if enc == "libvpx-vp9" {
+        // Good quality at a usable speed (the default "good" deadline at cpu-used 0 is very slow).
+        a.extend(["-row-mt".into(), "1".into(), "-deadline".into(), "good".into(), "-cpu-used".into(), "4".into()]);
     }
     for (key, flag) in [("color_primaries", "-color_primaries"), ("color_transfer", "-color_trc"), ("color_space", "-colorspace"), ("color_range", "-color_range")] {
         if let Some(val) = v[key].as_str().filter(|s| *s != "unknown") {
@@ -406,6 +444,28 @@ pub async fn media_export<R: Runtime>(app: AppHandle<R>, req: ExportRequest) -> 
     Ok(saved.to_string_lossy().into_owned())
 }
 
+fn keep(flags: &[bool], i: usize) -> bool {
+    flags.get(i).copied().unwrap_or(true)
+}
+
+/// Runs ffmpeg for a quick side job (subtitle conversion, the final subtitle mux).
+fn run_quiet(ffmpeg: &Path, args: &[String]) -> Result<(), String> {
+    let out = crate::tools::quiet_command(ffmpeg).args(["-hide_banner", "-nostats", "-y"]).args(args).output().map_err(|e| e.to_string())?;
+    if out.status.success() {
+        Ok(())
+    } else {
+        let err = String::from_utf8_lossy(&out.stderr);
+        Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg stopped").to_owned())
+    }
+}
+
+/// A subtitle track to add to the saved file: an SRT file and its language and title.
+struct ExtraSubs {
+    file: PathBuf,
+    language: Option<String>,
+    title: Option<String>,
+}
+
 fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) -> Result<PathBuf, String> {
     let source = PathBuf::from(&req.source);
     let src_ext = ext_of(&source);
@@ -414,87 +474,170 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
         return Err("Nothing is left to save: every part was cut out.".into());
     }
     let total: f64 = segs.iter().map(|s| s.end - s.start).sum();
-    let has_video = !streams(&req.probe, "video").iter().all(|v| v["disposition"]["attached_pic"] == 1);
-    let audio = streams(&req.probe, "audio");
-
-    // Fades and loudness change the sound over the whole result, so they need the frame-exact
-    // path (for audio files that costs nothing extra: audio is re-encoded either way).
-    let tone = req.eq.iter().any(|g| g.abs() > 0.05) || req.denoise || req.compress;
-    let shaping = !req.mute && !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || tone);
-    // Save As with another audio extension converts (audio files only).
-    let dest_ext = (req.target == "path").then(|| req.dest.as_deref().map(|d| ext_of(Path::new(d)))).flatten();
-    let convert_to = dest_ext.clone().filter(|e| *e != src_ext && !has_video);
-    let (ext, mode) = match req.mode.as_str() {
-        _ if convert_to.is_some() && req.mode != "smaller" => (convert_to.clone().unwrap(), "accurate"),
-        "smaller" => (if has_video { "mp4".to_owned() } else { "m4a".to_owned() }, "smaller"),
-        _ if shaping => (src_ext.clone(), "accurate"),
-        // Changing the volume needs the audio re-encoded; the video can still be copied.
-        "lossless" if req.gain_db.abs() > 0.01 => (src_ext.clone(), "lossless"),
-        m => (src_ext.clone(), if m == "accurate" { "accurate" } else { "lossless" }),
+    let speed = if req.speed.is_finite() && req.speed > 0.0 { req.speed.clamp(0.25, 4.0) } else { 1.0 };
+    let sped = (speed - 1.0).abs() > 1e-6;
+    // Length of the result: progress and fades are measured on it.
+    let out_total = total / speed;
+    let gif = req.output == "gif";
+    let audio_only = req.output == "audio";
+    let video = streams(&req.probe, "video").into_iter().find(|v| v["disposition"]["attached_pic"] != 1);
+    let has_video = video.is_some();
+    let video_out = has_video && !audio_only;
+    if gif && !has_video {
+        return Err("Only a video can be saved as a GIF.".into());
+    }
+    // Tracks to write, each with its position among the file's tracks of that kind.
+    let audio: Vec<(usize, &Value)> = if req.mute || gif {
+        vec![]
+    } else {
+        streams(&req.probe, "audio").into_iter().enumerate().filter(|(i, _)| keep(&req.keep_audio, *i)).take(if audio_only { 1 } else { usize::MAX }).collect()
     };
+    if audio_only && audio.is_empty() {
+        return Err("There’s no sound to save: the sound is removed or every track is turned off.".into());
+    }
+    let subs: Vec<(usize, &Value)> = if video_out && !gif { streams(&req.probe, "subtitle").into_iter().enumerate().filter(|(i, _)| keep(&req.keep_subs, *i)).collect() } else { vec![] };
+
+    // Fades, loudness, tone and speed change the sound over the whole result, so they need the
+    // frame-exact path (for audio files that costs nothing extra: audio is re-encoded either way).
+    let tone = req.eq.iter().any(|g| g.abs() > 0.05) || req.denoise || req.compress;
+    let shaping = !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || tone || sped);
+    let turned = video_out && (!req.rotate.is_multiple_of(360) || req.flip);
+    let crop = if video_out { req.crop.and_then(Crop::effective) } else { None };
+    let dest_ext = (req.target == "path").then(|| req.dest.as_deref().map(|d| ext_of(Path::new(d)))).flatten();
+
+    // The sound saved as another audio format is converted: Save As on an audio file, or a
+    // video's sound in a type that can't hold its codec as it is.
+    let (ext, convert_to): (String, Option<String>) = if gif {
+        ("gif".into(), None)
+    } else if audio_only {
+        let codec = audio[0].1["codec_name"].as_str().unwrap_or_default();
+        let natural = convert::natural_audio_ext(codec);
+        let e = dest_ext.clone().unwrap_or_else(|| natural.to_owned());
+        let copyable = e == natural || e == "mka";
+        (e.clone(), (!copyable).then_some(e))
+    } else if req.mode == "smaller" {
+        ((if has_video { "mp4" } else { "m4a" }).into(), None)
+    } else {
+        match dest_ext.clone().filter(|e| *e != src_ext) {
+            Some(e) if !has_video => (e.clone(), Some(e)),
+            Some(e) => (e, None),
+            None => (src_ext.clone(), None),
+        }
+    };
+    let same_container = ext == src_ext;
+    // Turning the picture is lossless where the container carries a display matrix; cropping
+    // and speed always redraw it.
+    let redraw = video_out && (crop.is_some() || sped || gif || (turned && !convert::rotates_losslessly(&ext)));
+    let mode = match req.mode.as_str() {
+        _ if gif => "accurate",
+        "smaller" if !audio_only => "smaller",
+        _ if convert_to.is_some() || shaping || redraw => "accurate",
+        "accurate" => "accurate",
+        // Changing the volume needs the audio re-encoded; the video can still be copied.
+        _ => "lossless",
+    };
+    if mode == "lossless" && video_out && !same_container {
+        let codec = video.map(|v| v["codec_name"].as_str().unwrap_or_default()).unwrap_or_default();
+        if !convert::video_fits(codec, &ext) {
+            return Err(format!("{} can’t hold this video’s picture as it is. Choose Frame-exact to convert it, or save as MKV.", ext.to_uppercase()));
+        }
+    }
+
     let dest = destination(req, &ext)?;
     let dir = dest.parent().ok_or("no folder")?.to_path_buf();
-    let tmp_out = dir.join(format!(".{}.immediate-tmp.{ext}", dest.file_stem().map(|s| s.to_string_lossy()).unwrap_or_default()));
+    let stem = dest.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+    let tmp_out = dir.join(format!(".{stem}.immediate-tmp.{ext}"));
+    let tmp_subs = dir.join(format!(".{stem}.immediate-subs.{ext}"));
     let work = std::env::temp_dir().join(format!("immediate-export-{}", std::process::id()));
     let _ = std::fs::create_dir_all(&work);
     let cleanup = || {
         let _ = std::fs::remove_dir_all(&work);
         let _ = std::fs::remove_file(&tmp_out);
+        let _ = std::fs::remove_file(&tmp_subs);
     };
 
     let movflags: Vec<String> = if matches!(ext.as_str(), "mp4" | "m4v" | "mov" | "m4a") { vec!["-movflags".into(), "+faststart".into()] } else { vec![] };
-    let gain: Vec<String> = if req.gain_db.abs() > 0.01 { vec!["-af".into(), format!("volume={:.2}dB", req.gain_db)] } else { vec![] };
+    let gain: Vec<String> = if req.gain_db.abs() > 0.01 && !audio.is_empty() { vec!["-af".into(), format!("volume={:.2}dB", req.gain_db)] } else { vec![] };
+    let source_cw = video.map(convert::source_rotation).unwrap_or(0);
+    let display = if mode == "lossless" && turned { convert::display_args(source_cw, req.rotate, req.flip) } else { vec![] };
+    // How many subtitle tracks the main pass writes (added ones come after them).
+    let mut subs_written = 0usize;
 
     let result = (|| -> Result<(), String> {
         match mode {
             "lossless" => {
-                let audio_args: Vec<String> = if req.mute {
-                    vec!["-an".into()]
-                } else if !gain.is_empty() {
-                    let mut a = gain.clone();
-                    for (i, s) in audio.iter().enumerate() {
-                        a.extend(audio_settings(s, i));
+                // Streams to keep and how to write each: copied, unless the new container can't
+                // hold it as it is.
+                let mut maps: Vec<String> = Vec::new();
+                let mut codecs: Vec<String> = vec!["-c".into(), "copy".into()];
+                if video_out {
+                    maps.extend(["-map".into(), "0:v?".into()]);
+                }
+                for (j, (i, s)) in audio.iter().enumerate() {
+                    maps.extend(["-map".into(), format!("0:a:{i}")]);
+                    let codec = s["codec_name"].as_str().unwrap_or_default();
+                    if !gain.is_empty() {
+                        codecs.extend(audio_settings(s, j));
+                    } else if !same_container && !convert::audio_fits(codec, &ext) {
+                        let (enc, br) = convert::audio_fallback(&ext);
+                        codecs.extend([format!("-c:a:{j}"), enc.into(), format!("-b:a:{j}"), br.into()]);
                     }
-                    a
-                } else {
-                    vec![]
-                };
+                }
+                for (i, s) in &subs {
+                    let codec = s["codec_name"].as_str().unwrap_or_default();
+                    let how = if same_container { Some("copy") } else { convert::subtitle_codec(codec, &ext) };
+                    if let Some(how) = how {
+                        maps.extend(["-map".into(), format!("0:s:{i}")]);
+                        if how != "copy" {
+                            codecs.extend([format!("-c:s:{subs_written}"), how.into()]);
+                        }
+                        subs_written += 1;
+                    }
+                }
+                if same_container {
+                    // Fonts attached to MKV subtitles, timecode and other data tracks.
+                    maps.extend(["-map".into(), "0:t?".into(), "-map".into(), "0:d?".into()]);
+                }
                 // Each part starts on a keyframe (the UI sends keyframe-aligned starts). Seeking
                 // before the input backs up to an earlier keyframe, so: a coarse seek there for
                 // speed, then an exact one after the input that lands on the keyframe itself.
-                let one = |seg: &Segment, out: &Path, base: f64, share: f64| -> Result<(), String> {
+                let one = |seg: &Segment, out: &Path, base: f64, share: f64, turn: &[String]| -> Result<(), String> {
                     let coarse = (seg.start - 10.0).max(0.0);
                     let mut a: Vec<String> = Vec::new();
                     if coarse > 0.0 {
                         a.extend(["-ss".into(), fmt_t(coarse)]);
                     }
+                    a.extend(turn.iter().cloned());
                     a.extend(["-i".into(), req.source.clone()]);
                     if seg.start - coarse > 0.0005 {
                         a.extend(["-ss".into(), fmt_t(seg.start - coarse - 0.0005)]);
                     }
                     a.extend(["-to".into(), fmt_t(seg.end - coarse)]);
-                    a.extend(["-map".into(), "0".into(), "-c".into(), "copy".into(), "-ignore_unknown".into()]);
-                    a.extend(audio_args.iter().cloned());
+                    a.extend(maps.iter().cloned());
+                    a.extend(codecs.iter().cloned());
+                    a.push("-ignore_unknown".into());
+                    a.extend(gain.iter().cloned());
                     a.extend(["-avoid_negative_ts".into(), "make_zero".into()]);
                     a.extend(movflags.iter().cloned());
                     a.push(out.to_string_lossy().into_owned());
                     run_with_progress(app, ffmpeg, &a, seg.end - seg.start, base, share)
                 };
                 if segs.len() == 1 {
-                    one(&segs[0], &tmp_out, 0.0, 1.0)
+                    one(&segs[0], &tmp_out, 0.0, 1.0, &display)
                 } else {
                     let mut list = String::new();
                     let mut done = 0.0;
                     for (i, seg) in segs.iter().enumerate() {
                         let part = work.join(format!("part{i}.{ext}"));
                         let share = (seg.end - seg.start) / total * 0.9;
-                        one(seg, &part, done, share)?;
+                        one(seg, &part, done, share, &[])?;
                         done += share;
                         list.push_str(&format!("file '{}'\n", part.to_string_lossy().replace('\\', "/").replace('\'', "'\\''")));
                     }
                     let list_path = work.join("list.txt");
                     std::fs::write(&list_path, list).map_err(|e| e.to_string())?;
-                    let mut a: Vec<String> = vec!["-f".into(), "concat".into(), "-safe".into(), "0".into(), "-i".into(), list_path.to_string_lossy().into_owned()];
+                    let mut a: Vec<String> = display.clone();
+                    a.extend(["-f".into(), "concat".into(), "-safe".into(), "0".into(), "-i".into(), list_path.to_string_lossy().into_owned()]);
                     a.extend(["-i".into(), req.source.clone(), "-map".into(), "0".into(), "-map_metadata".into(), "1".into(), "-map_chapters".into(), "-1".into()]);
                     a.extend(["-c".into(), "copy".into(), "-ignore_unknown".into()]);
                     a.extend(movflags.iter().cloned());
@@ -504,22 +647,21 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
             }
             _ => {
                 // Frame-exact: trim + concat filters, then encode.
-                let video = if has_video { streams(&req.probe, "video").first().copied() } else { None };
-                let keep_audio: Vec<&Value> = if req.mute { vec![] } else { audio.clone() };
+                let v = if video_out { video } else { None };
                 let mut fc = String::new();
                 let mut concat_in = String::new();
                 for (i, s) in segs.iter().enumerate() {
-                    if video.is_some() {
+                    if v.is_some() {
                         fc.push_str(&format!("[0:v:0]trim=start={}:end={},setpts=PTS-STARTPTS[v{i}];", fmt_t(s.start), fmt_t(s.end)));
                         concat_in.push_str(&format!("[v{i}]"));
                     }
-                    for k in 0..keep_audio.len() {
-                        fc.push_str(&format!("[0:a:{k}]atrim=start={}:end={},asetpts=PTS-STARTPTS[a{k}_{i}];", fmt_t(s.start), fmt_t(s.end)));
+                    for (k, (orig, _)) in audio.iter().enumerate() {
+                        fc.push_str(&format!("[0:a:{orig}]atrim=start={}:end={},asetpts=PTS-STARTPTS[a{k}_{i}];", fmt_t(s.start), fmt_t(s.end)));
                         concat_in.push_str(&format!("[a{k}_{i}]"));
                     }
                 }
-                let nv = usize::from(video.is_some());
-                let na = keep_audio.len();
+                let nv = usize::from(v.is_some());
+                let na = audio.len();
                 let mut outs = String::new();
                 if nv == 1 {
                     outs.push_str("[vout]");
@@ -528,23 +670,45 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     outs.push_str(&format!("[aout{k}]"));
                 }
                 fc.push_str(&format!("{concat_in}concat=n={}:v={nv}:a={na}{outs}", segs.len()));
-                // Sound shaping on the joined result: volume, tone…, then loudness, then fades.
+                // The picture: turn, mirror, crop, speed, then what the output needs.
+                if nv == 1 {
+                    let mut chain = convert::picture_filters(req.rotate, req.flip, crop);
+                    if sped {
+                        chain.push(format!("setpts=PTS/{speed:.4}"));
+                    }
+                    if gif {
+                        // 15 frames a second at up to 480 px wide, one palette for the clip.
+                        chain.push("fps=15,scale='min(480,iw)':-2:flags=lanczos,split[g0][g1];[g0]palettegen=stats_mode=diff[gp];[g1][gp]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle".into());
+                    }
+                    if !chain.is_empty() {
+                        fc = fc.replacen("[vout]", "[vraw]", 1);
+                        fc.push_str(&format!(";[vraw]{}[vout]", chain.join(",")));
+                    }
+                }
+                // The sound: volume, tone… then speed, loudness, fades.
                 let pre = shaping_chain(req.gain_db, req.eq, req.denoise, req.compress);
                 let mut fades: Vec<String> = Vec::new();
                 if req.fade_in > 0.0 {
-                    fades.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(total)));
+                    fades.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(out_total)));
                 }
                 if req.fade_out > 0.0 {
-                    let d = req.fade_out.min(total);
-                    fades.push(format!("afade=t=out:st={:.3}:d={d:.3}", (total - d).max(0.0)));
+                    let d = req.fade_out.min(out_total);
+                    fades.push(format!("afade=t=out:st={:.3}:d={d:.3}", (out_total - d).max(0.0)));
                 }
                 // Loudness is measured first (each track on its own), then applied as one gain.
                 let measure_share = if req.normalize && na > 0 { 0.3 } else { 0.0 };
-                for k in 0..na {
+                for (k, (orig, s)) in audio.iter().enumerate() {
                     let mut chain = pre.clone();
+                    if req.keep_pitch {
+                        chain.extend(convert::atempo(speed));
+                    } else if sped {
+                        // Like a tape: play the samples faster or slower, then back to the rate.
+                        let sr = s["sample_rate"].as_str().and_then(|r| r.parse::<f64>().ok()).unwrap_or(48000.0);
+                        chain.push(format!("asetrate={},aresample={}", (sr * speed).round(), sr));
+                    }
                     if req.normalize {
                         let share = measure_share / na as f64;
-                        let tail = run_ffmpeg_tail(app, ffmpeg, &measure_args(&req.source, &segs, k, &pre), total, share * k as f64, share, "export", true)?;
+                        let tail = run_ffmpeg_tail(app, ffmpeg, &measure_args(&req.source, &segs, *orig, &pre), total, share * k as f64, share, "export", true)?;
                         // A silent track has no loudness to even out; leave it as it is.
                         if let Ok((i, tp)) = parse_loudness(&tail.join("\n")) {
                             chain.extend(loudness_filters(i, tp));
@@ -564,22 +728,41 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     a.extend(["-map".into(), format!("[aout{k}]")]);
                 }
                 a.extend(["-map_metadata".into(), "0".into()]);
-                if mode == "smaller" {
+                // Filtered tracks don't inherit their tags: carry each sound track's language and
+                // title over (and the picture's, when it isn't a GIF).
+                let mut tags = |kind: &str, n: usize, s: &Value| {
+                    for key in ["language", "title"] {
+                        if let Some(val) = s["tags"][key].as_str() {
+                            a.extend([format!("-metadata:s:{kind}:{n}"), format!("{key}={val}")]);
+                        }
+                    }
+                };
+                if let (Some(v), false) = (v, gif) {
+                    tags("v", 0, v);
+                }
+                for (k, (_, s)) in audio.iter().enumerate() {
+                    tags("a", k, s);
+                }
+                if gif {
+                    a.extend(["-loop".into(), "0".into()]);
+                } else if mode == "smaller" {
                     let target_bits = req.size_mb.unwrap_or(10.0) * 8.0 * 1_000_000.0 * 0.94;
                     let audio_bps = if na > 0 { 96_000.0 * na as f64 } else { 0.0 };
-                    let mut vbps = (target_bits / total - audio_bps).max(80_000.0);
+                    let mut vbps = (target_bits / out_total - audio_bps).max(80_000.0);
                     // Never bigger than it was: a short clip that already fits keeps its bitrate.
-                    if let Some(src) = video.and_then(|v| num(&v["bit_rate"])).or_else(|| num(&req.probe["format"]["bit_rate"])) {
+                    if let Some(src) = v.and_then(|v| num(&v["bit_rate"])).or_else(|| num(&req.probe["format"]["bit_rate"])) {
                         vbps = vbps.min(src);
                     }
                     if nv == 1 {
                         // Fewer pixels when the bitrate is too low for the full size.
-                        let (w, h) = (video.and_then(|v| v["width"].as_f64()).unwrap_or(1920.0), video.and_then(|v| v["height"].as_f64()).unwrap_or(1080.0));
+                        let (w, h) = (v.and_then(|v| v["width"].as_f64()).unwrap_or(1920.0), v.and_then(|v| v["height"].as_f64()).unwrap_or(1080.0));
                         let long = w.max(h);
                         let target_long: f64 = if vbps < 400_000.0 { 640.0 } else if vbps < 1_200_000.0 { 960.0 } else if vbps < 2_500_000.0 { 1280.0 } else { 1920.0 };
                         if long > target_long {
                             let idx = a.iter().position(|x| x == "-filter_complex").unwrap() + 1;
-                            let scale = if w >= h { format!("scale={}:-2", target_long as u32) } else { format!("scale=-2:{}", target_long as u32) };
+                            let t = target_long as u32;
+                            // Fit the long side, whichever way the (turned, cropped) picture faces.
+                            let scale = format!("scale='if(gte(iw,ih),min({t},iw),-2)':'if(gte(iw,ih),-2,min({t},ih))'");
                             a[idx] = a[idx].replacen("[vout]", "[vpre]", 1) + &format!(";[vpre]{scale}[vout]");
                         }
                         vbps = vbps.round();
@@ -590,27 +773,104 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                         a.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "96k".into()]);
                     }
                 } else {
-                    if let Some(v) = video {
-                        a.extend(video_settings(v, &req.probe, 0));
+                    if let Some(v) = v {
+                        let codec = v["codec_name"].as_str().unwrap_or_default();
+                        let other = (!same_container && !convert::video_fits(codec, &ext)).then(|| convert::video_fallback(&ext));
+                        a.extend(video_settings(v, &req.probe, 0, other));
                     }
-                    for (k, s) in keep_audio.iter().enumerate() {
+                    for (k, (_, s)) in audio.iter().enumerate() {
+                        let codec = s["codec_name"].as_str().unwrap_or_default();
                         match &convert_to {
                             Some(e) => a.extend(audio_for_ext(e, s, k)),
+                            None if !same_container && !convert::audio_fits(codec, &ext) => {
+                                let (enc, br) = convert::audio_fallback(&ext);
+                                a.extend([format!("-c:a:{k}"), enc.into(), format!("-b:a:{k}"), br.into()]);
+                            }
                             None => a.extend(audio_settings(s, k)),
                         }
                     }
                 }
                 a.extend(movflags.iter().cloned());
                 a.push(tmp_out.to_string_lossy().into_owned());
-                run_with_progress(app, ffmpeg, &a, total, measure_share, 1.0 - measure_share)
+                run_with_progress(app, ffmpeg, &a, out_total, measure_share, 1.0 - measure_share)
             }
         }
     })();
-
     if let Err(e) = result {
         cleanup();
-        return Err(if e == "cancelled" { e } else { format!("Couldn’t save the video: {e}") });
+        return Err(if e == "cancelled" { e } else { format!("Couldn’t save: {e}") });
     }
+
+    // Subtitles that follow the edit: the source's text tracks when the picture was re-encoded
+    // (lossless saves copied them already), and an added subtitle file.
+    if video_out && !gif {
+        if let Some(sub_codec) = convert::new_subtitle_codec(&ext) {
+            let mut extra: Vec<ExtraSubs> = Vec::new();
+            let mut add = |from: &Path, language: Option<String>, title: Option<String>, name: &str| -> Result<(), String> {
+                let srt = work.join(format!("{name}.srt"));
+                run_quiet(ffmpeg, &["-i".into(), from.to_string_lossy().into_owned(), "-map".into(), "0:s:0".into(), "-c:s".into(), "srt".into(), srt.to_string_lossy().into_owned()])?;
+                let text = std::fs::read_to_string(&srt).map_err(|e| e.to_string())?;
+                let cues = convert::retime(&convert::parse_srt(&text), &segs, speed);
+                if !cues.is_empty() {
+                    let out = work.join(format!("{name}-kept.srt"));
+                    std::fs::write(&out, convert::write_srt(&cues)).map_err(|e| e.to_string())?;
+                    extra.push(ExtraSubs { file: out, language, title });
+                }
+                Ok(())
+            };
+            let tag = |s: &Value, k: &str| s["tags"][k].as_str().map(str::to_owned);
+            if mode != "lossless" {
+                for (i, s) in &subs {
+                    if convert::is_text_subtitle(s["codec_name"].as_str().unwrap_or_default()) {
+                        // One track out of the source into its own file, then retimed.
+                        let one = work.join(format!("src{i}.mkv"));
+                        let pulled = run_quiet(ffmpeg, &["-i".into(), req.source.clone(), "-map".into(), format!("0:s:{i}"), "-c".into(), "copy".into(), one.to_string_lossy().into_owned()]);
+                        if pulled.is_ok() {
+                            let _ = add(&one, tag(s, "language"), tag(s, "title"), &format!("src{i}"));
+                        }
+                    }
+                }
+            }
+            if let Some(f) = &req.subtitle_file {
+                let title = Path::new(f).file_stem().map(|s| s.to_string_lossy().into_owned());
+                if let Err(e) = add(Path::new(f), None, title, "added") {
+                    cleanup();
+                    return Err(format!("Couldn’t read the subtitle file: {e}"));
+                }
+            }
+            if !extra.is_empty() {
+                let mut a: Vec<String> = vec!["-i".into(), tmp_out.to_string_lossy().into_owned()];
+                for x in &extra {
+                    a.extend(["-i".into(), x.file.to_string_lossy().into_owned()]);
+                }
+                a.extend(["-map".into(), "0".into()]);
+                for i in 0..extra.len() {
+                    a.extend(["-map".into(), format!("{}:0", i + 1)]);
+                }
+                a.extend(["-c".into(), "copy".into()]);
+                for (i, x) in extra.iter().enumerate() {
+                    let n = subs_written + i;
+                    a.extend([format!("-c:s:{n}"), sub_codec.into()]);
+                    if let Some(l) = &x.language {
+                        a.extend([format!("-metadata:s:s:{n}"), format!("language={l}")]);
+                    }
+                    if let Some(t) = &x.title {
+                        a.extend([format!("-metadata:s:s:{n}"), format!("title={t}")]);
+                    }
+                }
+                a.extend(movflags.iter().cloned());
+                a.push(tmp_subs.to_string_lossy().into_owned());
+                if let Err(e) = run_quiet(ffmpeg, &a).and_then(|_| std::fs::rename(&tmp_subs, &tmp_out).map_err(|e| e.to_string())) {
+                    cleanup();
+                    return Err(format!("Couldn’t add the subtitles: {e}"));
+                }
+            }
+        } else if req.subtitle_file.is_some() {
+            cleanup();
+            return Err(format!("{} files can’t hold subtitles. Save as MP4 or MKV to add them.", ext.to_uppercase()));
+        }
+    }
+
     if req.target == "replace" {
         if let Err(e) = trash::delete(&source) {
             cleanup();
@@ -683,7 +943,7 @@ mod tests {
               "avg_frame_rate": "30000/1001", "color_primaries": "bt709", "color_transfer": "bt709", "color_space": "bt709" },
             { "codec_type": "audio", "codec_name": "aac", "bit_rate": "256000", "sample_rate": "48000", "channels": 2 } ] });
         let v = &probe["streams"][0];
-        let a = video_settings(v, &probe, 0);
+        let a = video_settings(v, &probe, 0, None);
         let s = a.join(" ");
         assert!(s.contains("-c:v:0 libx264"), "{s}");
         assert!(s.contains("-b:v 8200000"), "{s}");

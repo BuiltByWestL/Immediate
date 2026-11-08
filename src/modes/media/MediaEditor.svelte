@@ -11,6 +11,7 @@
   import MediaPanel from "./MediaPanel.svelte";
   import { mediaKeys } from "./keys";
   import { changeMedia, commitMedia as commit, fmtTime, keptSegments, media, nextKept, totalLength } from "./session.svelte";
+  import CropFrame from "./CropFrame.svelte";
   import Timeline from "./Timeline.svelte";
 
   let { file }: { file: OpenedFile } = $props();
@@ -152,7 +153,10 @@
         break;
       }
     }
-    const total = totalLength(kept);
+    // Fades are measured on the result, which plays at the chosen speed.
+    const speed = media.edit.speed;
+    pos /= speed;
+    const total = totalLength(kept) / speed;
     let g = 1;
     if (fadeIn) g *= Math.min(1, pos / Math.min(fadeIn, total));
     if (fadeOut) g *= Math.min(1, (total - pos) / Math.min(fadeOut, total));
@@ -254,7 +258,35 @@
       showStill(media.time);
     }
   }
+  // Speed is heard and seen while playing; with "Keep the pitch" off the pitch follows it.
+  $effect(() => {
+    const speed = media.edit.speed;
+    const keep = media.edit.keepPitch;
+    if (!el) return;
+    el.playbackRate = speed;
+    el.preservesPitch = keep;
+  });
+
+  // The picture as it will be saved: turned and mirrored here, with the crop drawn over it.
+  let stageW = $state(0);
+  let stageH = $state(0);
+  let natural = $state<{ w: number; h: number } | null>(null);
+  const box = $derived.by(() => {
+    if (!natural || !stageW || !stageH) return null;
+    const sideways = media.edit.rotate % 180 !== 0;
+    const w = sideways ? natural.h : natural.w;
+    const h = sideways ? natural.w : natural.h;
+    const s = Math.min(stageW / w, stageH / h);
+    return { w: w * s, h: h * s, scale: s };
+  });
+  const pictureStyle = $derived.by(() => {
+    if (!box || !natural) return "";
+    const flip = media.edit.flip ? " scaleX(-1)" : "";
+    return `width:${natural.w * box.scale}px;height:${natural.h * box.scale}px;inset:auto;left:50%;top:50%;object-fit:fill;transform:translate(-50%,-50%)${flip} rotate(${media.edit.rotate}deg)`;
+  });
+
   function onloadedmetadata() {
+    if (el instanceof HTMLVideoElement && el.videoWidth) natural = { w: el.videoWidth, h: el.videoHeight };
     if (el instanceof HTMLVideoElement && el.videoWidth === 0 && isVideo) onerror();
     else if (el) {
       el.currentTime = media.edit.trim.start;
@@ -266,7 +298,7 @@
 
 <div class="editor">
   <div class="main">
-    <div class="stage">
+    <div class="stage" bind:clientWidth={stageW} bind:clientHeight={stageH}>
       {#if isVideo && !stills}
         <!-- svelte-ignore a11y_media_has_caption -->
         <video
@@ -284,9 +316,18 @@
           {onloadedmetadata}
           {onerror}
           onclick={togglePlay}
+          style={pictureStyle}
         ></video>
       {:else if isVideo && stills}
-        {#if still}<img src={still} alt="" />{/if}
+        {#if still}<img
+            src={still}
+            alt=""
+            style={pictureStyle}
+            onload={(e) => {
+              const i = e.currentTarget as HTMLImageElement;
+              if (!natural && i.naturalWidth) natural = { w: i.naturalWidth, h: i.naturalHeight };
+            }}
+          />{/if}
         <p class="note">
           {#if preparing}Getting this video ready to play… <span class="num">{Math.round(preview.progress * 100)}%</span> You can trim and cut already.
           {:else}This video can’t play inside Immediate. You can still trim and cut it: the picture follows where you click.{/if}
@@ -308,6 +349,9 @@
           {onloadedmetadata}
           onerror={() => (proxied ? (stills = true) : usePreview())}
         ></audio>
+      {/if}
+      {#if isVideo && box && media.edit.crop}
+        <CropFrame width={box.w} height={box.h} />
       {/if}
     </div>
 

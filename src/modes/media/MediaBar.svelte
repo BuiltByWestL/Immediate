@@ -7,6 +7,9 @@
   import { fmtTime, media, redoMedia, undoMedia } from "./session.svelte";
 
   let menuOpen = $state(false);
+  const streams = $derived((media.probe?.streams ?? []) as any[]);
+  const isVideo = $derived(streams.some((s) => s.codec_type === "video" && s.disposition?.attached_pic !== 1));
+  const hasSound = $derived(streams.some((s) => s.codec_type === "audio") && !media.edit.mute);
   const k = MOD === "⌘" ? "⌘" : "Ctrl+";
   const pct = $derived(Math.round(media.progress * 100));
 </script>
@@ -53,6 +56,11 @@
       <div class="menu" role="menu">
         <button type="button" role="menuitem" onclick={() => saveMedia("as")}><span>Save As…</span><span class="dim">{k}Shift+S</span></button>
         <button type="button" role="menuitem" onclick={() => saveMedia("replace")}><span>Replace original…</span></button>
+        {#if isVideo}
+          <div class="sep" role="separator"></div>
+          {#if hasSound}<button type="button" role="menuitem" onclick={() => saveMedia("copy", "audio")}><span>Save sound only</span></button>{/if}
+          <button type="button" role="menuitem" onclick={() => saveMedia("copy", "gif")}><span>Save as GIF</span></button>
+        {/if}
       </div>
     {/if}
   </div>
@@ -130,5 +138,10 @@
   }
   .menu button:hover {
     background: var(--hover);
+  }
+  .sep {
+    height: 1px;
+    margin: var(--s1) 0;
+    background: var(--line);
   }
 </style>

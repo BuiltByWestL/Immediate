@@ -20,6 +20,49 @@ export interface MediaEdit {
   eq: [number, number, number];
   denoise: boolean;
   compress: boolean;
+  /** Picture: clockwise turn (0/90/180/270), mirror, and a crop of the turned picture as
+   *  fractions of its width and height (null = whole frame). */
+  rotate: number;
+  flip: boolean;
+  crop: Range2D | null;
+  /** Playback speed of the result (1 = unchanged), keeping the pitch or letting it follow. */
+  speed: number;
+  keepPitch: boolean;
+  /** Tracks to keep, by their order in the file (missing = keep). */
+  keepAudio: boolean[];
+  keepSubs: boolean[];
+  /** A subtitle file to add as a track. */
+  subFile: string | null;
+}
+
+export interface Range2D {
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+export function blankEdit(duration: number): MediaEdit {
+  return {
+    trim: { start: 0, end: duration },
+    cuts: [],
+    mute: false,
+    gain: 0,
+    fadeIn: 0,
+    fadeOut: 0,
+    normalize: false,
+    eq: [0, 0, 0],
+    denoise: false,
+    compress: false,
+    rotate: 0,
+    flip: false,
+    crop: null,
+    speed: 1,
+    keepPitch: true,
+    keepAudio: [],
+    keepSubs: [],
+    subFile: null,
+  };
 }
 
 export type ExportMode = "lossless" | "accurate" | "smaller";
@@ -30,7 +73,7 @@ export const media = $state({
   probe: null as any,
   duration: 0,
   keyframes: [] as number[],
-  edit: { trim: { start: 0, end: 0 }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false, eq: [0, 0, 0], denoise: false, compress: false } as MediaEdit,
+  edit: blankEdit(0),
   past: [] as MediaEdit[],
   future: [] as MediaEdit[],
   /** Current play position, source seconds. */
@@ -45,6 +88,8 @@ export const media = $state({
   eta: null as number | null,
   /** Visible part of the timeline (seconds), for zoom. */
   view: { start: 0, end: 0 } as Range,
+  /** The crop's shape while cropping: width / height in pixels, or null for any shape. */
+  cropAspect: null as number | null,
 });
 
 let committed = "";
@@ -52,7 +97,8 @@ let committed = "";
 export function startMediaEdit(probe: any, duration: number) {
   media.probe = probe;
   media.duration = duration;
-  media.edit = { trim: { start: 0, end: duration }, cuts: [], mute: false, gain: 0, fadeIn: 0, fadeOut: 0, normalize: false, eq: [0, 0, 0], denoise: false, compress: false };
+  media.edit = blankEdit(duration);
+  media.cropAspect = null;
   media.past = [];
   media.future = [];
   media.selection = null;
@@ -101,7 +147,30 @@ export function redoMedia() {
 
 export function mediaChanged(): boolean {
   const e = media.edit;
-  return media.active && (e.trim.start > 0.001 || e.trim.end < media.duration - 0.001 || e.cuts.length > 0 || e.mute || Math.abs(e.gain) > 0.01 || e.fadeIn > 0 || e.fadeOut > 0 || e.normalize || e.eq.some((g) => g !== 0) || e.denoise || e.compress);
+  return (
+    media.active &&
+    (e.trim.start > 0.001 ||
+      e.trim.end < media.duration - 0.001 ||
+      e.cuts.length > 0 ||
+      e.mute ||
+      Math.abs(e.gain) > 0.01 ||
+      e.fadeIn > 0 ||
+      e.fadeOut > 0 ||
+      e.normalize ||
+      e.eq.some((g) => g !== 0) ||
+      e.denoise ||
+      e.compress ||
+      pictureChanged(e) ||
+      e.speed !== 1 ||
+      e.keepAudio.includes(false) ||
+      e.keepSubs.includes(false) ||
+      !!e.subFile)
+  );
+}
+
+/** Turned, mirrored or cropped. */
+export function pictureChanged(e: MediaEdit = media.edit): boolean {
+  return e.rotate % 360 !== 0 || e.flip || !!(e.crop && (e.crop.w < 0.999 || e.crop.h < 0.999));
 }
 
 /** Merged, sorted cut ranges inside the trim. */

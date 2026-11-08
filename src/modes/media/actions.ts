@@ -47,7 +47,20 @@ function extOf(p: string) {
   return (p.split(".").pop() ?? "").toLowerCase();
 }
 
-export async function saveMedia(target: "copy" | "as" | "replace") {
+/** Video formats the picture can move to without re-encoding (mirrors convert.rs). */
+function containersFor(videoCodec: string): string[] {
+  const out: string[] = [];
+  if (["h264", "hevc", "av1", "vp9", "mpeg4", "mpeg2video", "mpeg1video"].includes(videoCodec)) out.push("mp4");
+  if (["h264", "hevc", "av1", "vp9", "mpeg4", "mpeg2video", "prores", "mjpeg", "dnxhd", "png", "qtrle"].includes(videoCodec)) out.push("mov");
+  out.push("mkv");
+  if (["vp8", "vp9", "av1"].includes(videoCodec)) out.push("webm");
+  return out;
+}
+
+/** "": the edited file. "audio": only its sound. "gif": an animated GIF. */
+export type MediaOutput = "" | "audio" | "gif";
+
+export async function saveMedia(target: "copy" | "as" | "replace", output: MediaOutput = "") {
   const file = ui.file;
   if (!file || media.saving) return;
   const kept = keptSegments();
@@ -55,17 +68,30 @@ export async function saveMedia(target: "copy" | "as" | "replace") {
     toast("Nothing is left to save: every part was cut out.", "error");
     return;
   }
-  const hasVideo = (media.probe?.streams ?? []).some((s: any) => s.codec_type === "video" && s.disposition?.attached_pic !== 1);
-  const outExt = media.mode === "smaller" ? (hasVideo ? "mp4" : "m4a") : file.ext;
+  const video = (media.probe?.streams ?? []).find((s: any) => s.codec_type === "video" && s.disposition?.attached_pic !== 1);
+  const hasVideo = !!video;
+  // GIFs and a video's sound go next to the original (the saver picks the sound's file type).
+  if (output) target = file.temporary ? "as" : "copy";
+  const outExt = output === "gif" ? "gif" : output === "audio" ? "m4a" : media.mode === "smaller" ? (hasVideo ? "mp4" : "m4a") : file.ext;
   // Lossless parts start on keyframes, exactly as the timeline shows.
   const segments = media.mode === "lossless" && hasVideo ? snappedSegments(kept, media.keyframes) : kept;
   let dest: string | null = null;
   if (file.temporary && target !== "as") target = "as";
   if (target === "as") {
     const base = file.path.slice(0, file.path.length - file.ext.length - 1);
-    // Audio can be saved as another format by picking it here.
-    const audioFormats = hasVideo || media.mode === "smaller" ? [] : ["wav", "flac", "mp3", "m4a", "opus"].filter((x) => x !== outExt);
-    const choices = [outExt, ...audioFormats];
+    // Audio can be saved as another format by picking it here, and video moved to another
+    // container (the picture is copied as it is).
+    const others =
+      output === "gif"
+        ? []
+        : !hasVideo || output === "audio"
+          ? media.mode === "smaller" && !output
+            ? []
+            : ["wav", "flac", "mp3", "m4a", "opus"]
+          : media.mode === "smaller"
+            ? []
+            : containersFor(video.codec_name);
+    const choices = [outExt, ...others.filter((x) => x !== outExt)];
     dest = await saveDialog({
       defaultPath: `${base}${ui.settings.saveSuffix}.${outExt}`,
       filters: choices.map((x) => ({ name: x.toUpperCase(), extensions: [x] })),
@@ -108,6 +134,15 @@ export async function saveMedia(target: "copy" | "as" | "replace") {
         eq: media.edit.eq,
         denoise: media.edit.denoise,
         compress: media.edit.compress,
+        rotate: media.edit.rotate,
+        flip: media.edit.flip,
+        crop: media.edit.crop,
+        speed: media.edit.speed,
+        keepPitch: media.edit.keepPitch,
+        keepAudio: media.edit.keepAudio,
+        keepSubs: media.edit.keepSubs,
+        subtitleFile: media.edit.subFile,
+        output,
         target: target === "as" ? "path" : target,
         dest,
         suffix: ui.settings.saveSuffix,
@@ -115,9 +150,11 @@ export async function saveMedia(target: "copy" | "as" | "replace") {
         probe: media.probe,
       },
     });
-    stopMediaEdit();
     const name = saved.split(/[\\/]/).pop();
     toast(`Saved “${name}”`, undefined, { label: "Show in folder", run: () => invoke("reveal", { path: saved }) });
+    // A GIF or the sound alone is a by-product: keep editing the video.
+    if (output) return;
+    stopMediaEdit();
     await openPaths([saved]);
   } catch (e) {
     if (String(e) !== "cancelled") toast(String(e), "error");

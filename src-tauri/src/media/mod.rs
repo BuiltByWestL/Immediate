@@ -2,6 +2,7 @@
 //! waveform, frame thumbnails). Editing and export live in export.rs; installing ffmpeg in
 //! install.rs.
 
+mod convert;
 pub mod export;
 pub mod install;
 pub mod record;

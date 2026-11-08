@@ -1,10 +1,16 @@
 <script lang="ts">
   import Camera from "@lucide/svelte/icons/camera";
+  import Captions from "@lucide/svelte/icons/captions";
+  import FlipHorizontal from "@lucide/svelte/icons/flip-horizontal-2";
+  import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
+  import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Scissors from "@lucide/svelte/icons/scissors";
+  import X from "@lucide/svelte/icons/x";
+  import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { ui, updateSettings } from "../../lib/app.svelte";
   import Slider from "../image/Slider.svelte";
   import { grabFrame } from "./actions";
-  import { changeMedia, commitMedia, fmtTime, keptSegments, media, snappedSegments, totalLength } from "./session.svelte";
+  import { blankEdit, changeMedia, commitMedia, fmtTime, keptSegments, media, pictureChanged, snappedSegments, totalLength, type Range2D } from "./session.svelte";
 
   let { isVideo, seek }: { isVideo: boolean; seek: (t: number) => void } = $props();
 
@@ -32,18 +38,8 @@
   }
 
   function resetEdits() {
-    changeMedia((e) => {
-      e.trim = { start: 0, end: media.duration };
-      e.cuts = [];
-      e.mute = false;
-      e.gain = 0;
-      e.fadeIn = 0;
-      e.fadeOut = 0;
-      e.normalize = false;
-      e.eq = [0, 0, 0];
-      e.denoise = false;
-      e.compress = false;
-    });
+    changeMedia((e) => Object.assign(e, blankEdit(media.duration)));
+    media.cropAspect = null;
   }
 
   // What Save will write, in plain words.
@@ -56,7 +52,11 @@
   const mbps = (b: any) => (Number(b) ? `${(Number(b) / 1e6).toFixed(1)} Mb/s` : "");
   const container = $derived((ui.file?.ext ?? "").toUpperCase());
 
-  const resultLength = $derived(media.mode === "lossless" && isVideo ? totalLength(snappedSegments(kept, media.keyframes)) : totalLength(kept));
+  /** Saving redraws the picture (no lossless cuts): crop, speed, or turning outside MP4/MOV. */
+  const redraws = $derived(
+    isVideo && (media.edit.speed !== 1 || !!media.edit.crop || ((media.edit.rotate !== 0 || media.edit.flip) && !["mp4", "m4v", "mov"].includes(ui.file?.ext ?? ""))),
+  );
+  const resultLength = $derived((media.mode === "lossless" && isVideo && !redraws ? totalLength(snappedSegments(kept, media.keyframes)) : totalLength(kept)) / media.edit.speed);
   const summary = $derived.by(() => {
     if (media.mode === "smaller") return `H.264${audios.length && !media.edit.mute ? " · AAC" : ""} · MP4 · about ${media.sizeMb} MB`;
     const parts: string[] = [];
@@ -70,6 +70,75 @@
 
   const SIZES = [8, 10, 25, 50, 100];
   const FADES = [0, 0.5, 1, 2, 3, 5];
+  const SPEEDS = [0.25, 0.5, 0.75, 1, 1.25, 1.5, 2, 4];
+
+  // Picture. The crop is kept in the turned picture's coordinates, so turning or mirroring
+  // moves it along with the picture.
+  const turnCw = (c: Range2D): Range2D => ({ x: 1 - c.y - c.h, y: c.x, w: c.h, h: c.w });
+  function turn(by: 90 | -90) {
+    changeMedia((e) => {
+      e.rotate = (e.rotate + by + 360) % 360;
+      if (e.crop) e.crop = by === 90 ? turnCw(e.crop) : turnCw(turnCw(turnCw(e.crop)));
+    });
+    if (media.cropAspect) media.cropAspect = 1 / media.cropAspect;
+  }
+  function mirror() {
+    changeMedia((e) => {
+      e.flip = !e.flip;
+      if (e.crop) e.crop = { ...e.crop, x: 1 - e.crop.x - e.crop.w };
+    });
+  }
+  /** The picture's shape as shown (after the file's own rotation and the turn here). */
+  const shown = $derived.by(() => {
+    if (!v) return { w: 16, h: 9 };
+    const matrix = (v.side_data_list ?? []).find((d: any) => d.rotation != null);
+    const sourceCw = (((-(matrix?.rotation ?? 0)) % 360) + 360) % 360;
+    const sideways = (sourceCw + media.edit.rotate) % 180 !== 0;
+    return sideways ? { w: v.height, h: v.width } : { w: v.width, h: v.height };
+  });
+  const ASPECTS: { label: string; r: number | null }[] = [
+    { label: "Free", r: null },
+    { label: "16:9", r: 16 / 9 },
+    { label: "9:16", r: 9 / 16 },
+    { label: "1:1", r: 1 },
+    { label: "4:5", r: 4 / 5 },
+  ];
+  function setCrop(r: number | null | "none") {
+    if (r === "none") {
+      media.cropAspect = null;
+      changeMedia((e) => (e.crop = null));
+      return;
+    }
+    media.cropAspect = r;
+    // The largest centered crop of that shape (or the whole picture, to drag from).
+    const frame = shown.w / shown.h;
+    const w = r === null ? 1 : r > frame ? 1 : r / frame;
+    const h = r === null ? 1 : r > frame ? frame / r : 1;
+    changeMedia((e) => (e.crop = { x: (1 - w) / 2, y: (1 - h) / 2, w, h }));
+  }
+  const cropping = $derived(media.edit.crop !== null);
+
+  // Tracks.
+  function trackName(s: any, kind: string, i: number, count: number) {
+    const bits = [count > 1 ? `${kind} ${i + 1}` : kind];
+    const lang = s.tags?.language;
+    if (s.tags?.title) bits.push(s.tags.title);
+    else if (lang && lang !== "und") bits.push(lang.toUpperCase());
+    return bits.join(" · ");
+  }
+  function toggleTrack(kind: "keepAudio" | "keepSubs", i: number) {
+    changeMedia((e) => {
+      const flags = [...e[kind]];
+      flags[i] = !(flags[i] ?? true);
+      e[kind] = flags;
+    });
+  }
+  const pictureSubs = $derived(subs.some((s) => !["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"].includes(s.codec_name)));
+  async function addSubtitles() {
+    const picked = await openDialog({ multiple: false, directory: false, filters: [{ name: "Subtitles", extensions: ["srt", "vtt", "ass", "ssa"] }] });
+    if (typeof picked === "string") changeMedia((e) => (e.subFile = picked));
+  }
+  const fileName = (p: string) => p.split(/[\\/]/).pop();
 </script>
 
 <aside class="panel" aria-label="Edit">
@@ -139,6 +208,75 @@
               <p class="note">Saving re-encodes the video to apply these sound changes, so it takes longer.</p>
             {/if}
           {/if}
+        {/if}
+      </section>
+    {/if}
+
+    {#if advanced && isVideo}
+      <section>
+        <h3>Picture</h3>
+        <div class="row">
+          <button type="button" class="btn" onclick={() => turn(-90)} title="Turn left"><RotateCcw size={16} strokeWidth={1.5} />Left</button>
+          <button type="button" class="btn" onclick={() => turn(90)} title="Turn right"><RotateCw size={16} strokeWidth={1.5} />Right</button>
+          <button type="button" class="btn" aria-pressed={media.edit.flip} onclick={mirror} title="Mirror left to right"><FlipHorizontal size={16} strokeWidth={1.5} />Mirror</button>
+        </div>
+        <h3 class="sub">Crop</h3>
+        <div class="chips" role="radiogroup" aria-label="Crop">
+          <button type="button" class="chip" role="radio" aria-checked={!cropping} onclick={() => setCrop("none")}>None</button>
+          {#each ASPECTS as a (a.label)}
+            <button type="button" class="chip" role="radio" aria-checked={cropping && media.cropAspect === a.r} onclick={() => setCrop(a.r)}>{a.label}</button>
+          {/each}
+        </div>
+        {#if cropping}<p class="hint">Drag the frame or its corners on the video.</p>{/if}
+        {#if redraws && pictureChanged()}
+          <p class="note">Saving re-encodes the video to apply these picture changes{media.edit.rotate || media.edit.flip ? " (turning alone stays lossless in MP4 and MOV)" : ""}.</p>
+        {/if}
+      </section>
+    {/if}
+
+    {#if advanced}
+      <section>
+        <h3>Speed</h3>
+        <div class="chips" role="radiogroup" aria-label="Speed">
+          {#each SPEEDS as s (s)}
+            <button type="button" class="chip num" role="radio" aria-checked={media.edit.speed === s} onclick={() => changeMedia((e) => (e.speed = s))}>{s}×</button>
+          {/each}
+        </div>
+        {#if media.edit.speed !== 1 && audios.length && !media.edit.mute}
+          <div class="toggle">
+            <span>Keep the pitch</span>
+            <button type="button" class="switch" role="switch" aria-checked={media.edit.keepPitch} aria-label="Keep the pitch" onclick={() => changeMedia((e) => (e.keepPitch = !e.keepPitch))}></button>
+          </div>
+          {#if !media.edit.keepPitch}<p class="hint">The pitch follows the speed, like a tape played faster or slower.</p>{/if}
+        {/if}
+      </section>
+    {/if}
+
+    {#if advanced && isVideo}
+      <section>
+        <h3>Tracks</h3>
+        {#each audios as a, i (i)}
+          <div class="toggle">
+            <span>{trackName(a, "Sound", i, audios.length)} <span class="dim">{cname(a.codec_name)}</span></span>
+            <button type="button" class="switch" role="switch" aria-checked={media.edit.keepAudio[i] ?? true} aria-label="Keep {trackName(a, 'Sound', i, audios.length)}" onclick={() => toggleTrack("keepAudio", i)}></button>
+          </div>
+        {/each}
+        {#each subs as s, i (i)}
+          <div class="toggle">
+            <span>{trackName(s, "Subtitles", i, subs.length)}</span>
+            <button type="button" class="switch" role="switch" aria-checked={media.edit.keepSubs[i] ?? true} aria-label="Keep {trackName(s, 'Subtitles', i, subs.length)}" onclick={() => toggleTrack("keepSubs", i)}></button>
+          </div>
+        {/each}
+        {#if pictureSubs}<p class="hint">Picture-based subtitles stay only in MKV files saved Lossless.</p>{/if}
+        {#if media.edit.subFile}
+          <div class="added">
+            <Captions size={16} strokeWidth={1.5} />
+            <span class="name" title={media.edit.subFile}>{fileName(media.edit.subFile)}</span>
+            <button type="button" class="icon-btn" aria-label="Remove the added subtitles" title="Remove" onclick={() => changeMedia((e) => (e.subFile = null))}><X size={15} strokeWidth={1.5} /></button>
+          </div>
+          <p class="hint">Added as a subtitle track, following your cuts.</p>
+        {:else}
+          <button type="button" class="btn" onclick={addSubtitles}><Captions size={16} strokeWidth={1.5} />Add subtitles…</button>
         {/if}
       </section>
     {/if}
@@ -288,6 +426,30 @@
     background: var(--accent);
     border-color: var(--accent);
     color: var(--on-accent);
+  }
+  .btn[aria-pressed="true"] {
+    border-color: var(--accent);
+    box-shadow: inset 0 0 0 1px var(--accent);
+  }
+  .row .btn {
+    flex: 1;
+    padding: 0 var(--s1);
+  }
+  .added {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
+    min-height: 30px;
+  }
+  .added .name {
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .chips + .toggle {
+    margin-top: var(--s2);
   }
   footer {
     padding: var(--s3) var(--s4);
