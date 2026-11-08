@@ -183,10 +183,11 @@
         const b = ctx.createBiquadFilter();
         b.type = type;
         b.frequency.value = f;
-        b.Q.value = 1;
+        b.Q.value = 0.7;
         return b;
       };
-      const eq = [mk("lowshelf", 100), mk("peaking", 1000), mk("highshelf", 8000)];
+      // Same bands as saving (export.rs): where laptop and phone speakers can play them.
+      const eq = [mk("lowshelf", 200), mk("peaking", 1000), mk("highshelf", 4000)];
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -20;
       comp.ratio.value = 3;

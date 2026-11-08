@@ -136,7 +136,7 @@
               </div>
             {/if}
             {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize || media.edit.eq.some((g) => g) || media.edit.denoise || media.edit.compress)}
-              <p class="hint">Fades and loudness re-encode the video too, so saving takes longer.</p>
+              <p class="note">Saving re-encodes the video to apply these sound changes, so it takes longer.</p>
             {/if}
           {/if}
         {/if}
@@ -229,6 +229,14 @@
   }
   .hint {
     margin-bottom: var(--s2);
+    font-size: var(--text-sm);
+    color: var(--text-dim);
+  }
+  /* About the whole sound section, so it stands apart from the last switch above it. */
+  .note {
+    margin-top: var(--s3);
+    padding-top: var(--s2);
+    border-top: 1px solid var(--line);
     font-size: var(--text-sm);
     color: var(--text-dim);
   }

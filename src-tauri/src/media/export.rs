@@ -17,6 +17,12 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::files::unique_path;
 
+// Tone bands, where laptop and phone speakers can play them (MediaEditor.svelte uses the same).
+const BASS_HZ: u32 = 200;
+const MID_HZ: u32 = 1000;
+const MID_Q: f64 = 0.7;
+const TREBLE_HZ: u32 = 4000;
+
 #[derive(Deserialize, Clone, Copy, Debug)]
 pub struct Segment {
     pub start: f64,
@@ -43,7 +49,7 @@ pub struct ExportRequest {
     /// Even out loudness (EBU R128, -16 LUFS: a common level for speech and music online).
     #[serde(default)]
     normalize: bool,
-    /// Tone in dB: bass (100 Hz shelf), mid (1 kHz), treble (8 kHz shelf).
+    /// Tone in dB: bass (shelf below BASS_HZ), mid (peak at MID_HZ), treble (shelf above TREBLE_HZ).
     #[serde(default)]
     eq: [f64; 3],
     #[serde(default)]
@@ -453,13 +459,14 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 }
                 let [bass, mid, treble] = req.eq;
                 if bass.abs() > 0.05 {
-                    chain.push(format!("bass=g={bass:.1}:f=100"));
+                    // Q 0.707 matches the Web Audio shelves heard while playing (slope 1).
+                    chain.push(format!("bass=g={bass:.1}:f={BASS_HZ}:t=q:w=0.707"));
                 }
                 if mid.abs() > 0.05 {
-                    chain.push(format!("equalizer=f=1000:t=q:w=1:g={mid:.1}"));
+                    chain.push(format!("equalizer=f={MID_HZ}:t=q:w={MID_Q}:g={mid:.1}"));
                 }
                 if treble.abs() > 0.05 {
-                    chain.push(format!("treble=g={treble:.1}:f=8000"));
+                    chain.push(format!("treble=g={treble:.1}:f={TREBLE_HZ}:t=q:w=0.707"));
                 }
                 if req.compress {
                     chain.push("acompressor=threshold=-20dB:ratio=3:attack=15:release=250:makeup=2".into());
