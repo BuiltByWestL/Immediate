@@ -60,7 +60,9 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            src-tauri/shell-ext
 
       - name: Linux build dependencies
         if: runner.os == 'Linux'
@@ -73,6 +75,9 @@ jobs:
         run: npm run build
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
+      - name: Right-click entry tests (Windows)
+        if: runner.os == 'Windows'
+        run: cargo test --release --manifest-path src-tauri/shell-ext/Cargo.toml
 
       - name: Build the app
         run: |
@@ -81,7 +86,8 @@ jobs:
             macOS)   bundles=app ;;
             Linux)   bundles=deb ;;
           esac
-          # CI builds aren't release builds: no updater signature (the key stays off CI until P5).
+          # CI builds aren't release builds: no updater signature, and the Windows right-click
+          # package stays unsigned (release.yml signs both).
           npx tauri build --bundles "$bundles" --config '{"bundle":{"createUpdaterArtifacts":false}}'
 
       - name: Installer size budget (12 MB)

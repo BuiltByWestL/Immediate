@@ -1,0 +1,12 @@
+{
+  "build": {
+    "beforeBuildCommand": "npm run build && node scripts/build-shell-menu.mjs"
+  },
+  "bundle": {
+    "resources": {
+      "shell-ext/out/immediate_menu.dll": "immediate_menu.dll",
+      "shell-ext/out/immediate-menu.msix": "immediate-menu.msix",
+      "shell-ext/package/immediate-menu.cer": "immediate-menu.cer"
+    }
+  }
+}

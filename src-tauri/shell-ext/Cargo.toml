@@ -1,0 +1,32 @@
+# The Windows 11 top-level right-click entry ("Edit with Immediate"). Explorer only shows
+# packaged IExplorerCommand handlers in its compact menu, so this small COM server ships beside
+# immediate.exe and is registered through a sparse package (package/AppxManifest.xml).
+# Built by scripts/build-shell-menu.mjs; Windows only.
+[package]
+name = "immediate-menu"
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+publish = false
+
+[lib]
+name = "immediate_menu"
+crate-type = ["cdylib", "rlib"]
+
+[target."cfg(windows)".dependencies]
+windows-core = "0.62"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_System_Com",
+  "Win32_System_LibraryLoader",
+  "Win32_UI_Shell",
+  "Win32_UI_Shell_Common",
+  "Win32_UI_WindowsAndMessaging",
+] }
+
+[profile.release]
+opt-level = "s"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

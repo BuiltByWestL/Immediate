@@ -2,22 +2,62 @@
 # Builds signed installers for Windows, macOS (Apple Silicon + Intel) and Linux, attaches them to
 # a GitHub release, then publishes the updater manifest (latest.json) to the `updates` branch.
 #
-# Needs two repository secrets (Settings > Secrets and variables > Actions):
+# Repository secrets (Settings > Secrets and variables > Actions):
 #   TAURI_SIGNING_PRIVATE_KEY           contents of %USERPROFILE%\.tauri\immediate.key
 #   TAURI_SIGNING_PRIVATE_KEY_PASSWORD  contents of %USERPROFILE%\.tauri\immediate.key.password
-# The key signs updates; installed copies only accept updates signed with it.
+#   IMMEDIATE_MENU_PFX                  base64 of %USERPROFILE%\.tauri\immediate-menu.pfx
+#   IMMEDIATE_MENU_PFX_PASSWORD         contents of %USERPROFILE%\.tauri\immediate-menu.pfx.password
+# The update key signs updates; installed copies only accept updates signed with it. The .pfx
+# signs the Windows 11 right-click package (scripts/build-shell-menu.mjs).
+#
+# Run it by hand (Actions > Release > Run workflow) for a dry run: a signed Windows build that
+# publishes nothing, to check the secrets.
 
 name: Release
 
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: write
 
 jobs:
+  dry-run:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            src-tauri
+            src-tauri/shell-ext
+      - run: npm ci
+      - name: Signed build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          IMMEDIATE_MENU_PFX: ${{ secrets.IMMEDIATE_MENU_PFX }}
+          IMMEDIATE_MENU_PFX_PASSWORD: ${{ secrets.IMMEDIATE_MENU_PFX_PASSWORD }}
+        run: npx tauri build --bundles nsis
+      - name: Check the signatures
+        shell: pwsh
+        run: |
+          $sig = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe.sig
+          if (-not $sig) { throw "no updater signature" }
+          $s = Get-AuthenticodeSignature src-tauri/shell-ext/out/immediate-menu.msix
+          if ($s.SignerCertificate.Subject -ne 'CN=BuiltByWestL') { throw "right-click package not signed" }
+          "Updater signature and right-click package signature OK."
+
   build:
+    if: github.event_name == 'push'
     strategy:
       fail-fast: false
       matrix:
@@ -42,7 +82,9 @@ jobs:
           targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri
+          workspaces: |
+            src-tauri
+            src-tauri/shell-ext
       - name: Linux build dependencies
         if: runner.os == 'Linux'
         run: |
@@ -54,6 +96,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+          IMMEDIATE_MENU_PFX: ${{ secrets.IMMEDIATE_MENU_PFX }}
+          IMMEDIATE_MENU_PFX_PASSWORD: ${{ secrets.IMMEDIATE_MENU_PFX_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Immediate ${{ github.ref_name }}

@@ -45,9 +45,24 @@
   }
   let helveticaInstalled = $state(false);
 
+  // Windows 11 top-level right-click entry.
+  let menu = $state<{ available: boolean; enabled: boolean } | null>(null);
+  let menuBusy = $state(false);
+  async function setMenu(enabled: boolean) {
+    menuBusy = true;
+    try {
+      menu = await invoke<{ available: boolean; enabled: boolean }>("shell_menu_set", { enabled });
+    } catch (e) {
+      toast(String(e), "error");
+    } finally {
+      menuBusy = false;
+    }
+  }
+
   onMount(() => {
     helveticaInstalled = fontInstalled("Helvetica Neue");
     if (!inTauri) return;
+    if (window.__IMMEDIATE__?.platform === "windows") invoke<typeof menu>("shell_menu_status").then((m) => (menu = m));
     getVersion().then((v) => (version = v));
     invoke<boolean>("update_token_present").then((p) => (tokenPresent = p));
     checkTools();
@@ -130,6 +145,25 @@
             <button type="button" class="switch" role="switch" aria-checked={s.removeLocation} aria-label="Remove location from saved photos" onclick={() => set({ removeLocation: !s.removeLocation })}></button>
           </div>
         </section>
+
+        {#if menu?.available}
+          <section>
+            <h3>Right-click menu</h3>
+            <div class="row">
+              <span>Show “Edit with Immediate” at the top</span>
+              <button type="button" class="switch" role="switch" aria-checked={menu.enabled} aria-busy={menuBusy} disabled={menuBusy} aria-label="Show Edit with Immediate at the top of the right-click menu" onclick={() => setMenu(!menu!.enabled)}></button>
+            </div>
+            <p class="note">
+              {#if menuBusy}
+                {menu.enabled ? "Removing…" : "Adding… Windows may ask for permission once."}
+              {:else if menu.enabled}
+                Right-click a photo, video or audio file to see it.
+              {:else}
+                Without this it’s under “Show more options”. The first time, Windows asks for permission to trust Immediate’s certificate.
+              {/if}
+            </p>
+          </section>
+        {/if}
 
         <section>
           <h3>Updates</h3>

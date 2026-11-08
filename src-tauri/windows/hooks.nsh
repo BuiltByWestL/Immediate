@@ -30,7 +30,14 @@
   DeleteRegKey HKCU "Software\Classes\SystemFileAssociations\.${EXT}\shell\Immediate"
 !macroend
 
+!macro NSIS_HOOK_PREINSTALL
+  Delete "$INSTDIR\immediate_menu.dll.old"
+  IfFileExists "$INSTDIR\immediate_menu.dll" 0 +2
+  Rename "$INSTDIR\immediate_menu.dll" "$INSTDIR\immediate_menu.dll.old"
+!macroend
+
 !macro NSIS_HOOK_POSTINSTALL
+  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "if (Get-AppxPackage -Name BuiltByWestL.Immediate.Menu) { Add-AppxPackage -Path '$INSTDIR\immediate-menu.msix' -ExternalLocation '$INSTDIR' }"`
   !insertmacro IMMEDIATE_PROGID "Immediate.Image" "Image file"
   !insertmacro IMMEDIATE_PROGID "Immediate.Video" "Video file"
   !insertmacro IMMEDIATE_PROGID "Immediate.Audio" "Audio file"
@@ -233,6 +240,8 @@
 !macroend
 
 !macro NSIS_HOOK_PREUNINSTALL
+  nsExec::Exec `powershell.exe -NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Get-AppxPackage -Name BuiltByWestL.Immediate.Menu | Remove-AppxPackage"`
+  Delete /REBOOTOK "$INSTDIR\immediate_menu.dll.old"
   !insertmacro IMMEDIATE_UNASSOC "jpg" "Immediate.Image"
   !insertmacro IMMEDIATE_UNASSOC "jpeg" "Immediate.Image"
   !insertmacro IMMEDIATE_UNASSOC "jfif" "Immediate.Image"

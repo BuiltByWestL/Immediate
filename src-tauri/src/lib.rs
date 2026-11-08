@@ -4,6 +4,7 @@ mod formats;
 mod image;
 mod media;
 mod settings;
+mod shellmenu;
 mod text;
 mod themes;
 mod tools;
@@ -151,7 +152,9 @@ pub fn run() {
             update::update_check,
             update::update_install,
             update::update_token_set,
-            update::update_token_present
+            update::update_token_present,
+            shellmenu::shell_menu_status,
+            shellmenu::shell_menu_set
         ])
         .build(tauri::generate_context!())
         .expect("error while starting Immediate");
