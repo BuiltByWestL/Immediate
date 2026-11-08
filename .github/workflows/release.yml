@@ -10,8 +10,8 @@
 # The update key signs updates; installed copies only accept updates signed with it. The .pfx
 # signs the Windows 11 right-click package (scripts/build-shell-menu.mjs).
 #
-# Run it by hand (Actions > Release > Run workflow) for a dry run: a signed Windows build that
-# publishes nothing, to check the secrets.
+# Run it by hand (Actions > Release > Run workflow) for a dry run: every installer, signed, kept as
+# downloadable workflow artifacts for a week and published nowhere (checks the secrets too).
 
 name: Release
 
@@ -24,9 +24,23 @@ permissions:
   contents: write
 
 jobs:
+  # Every installer the release makes, signed the same way, uploaded as workflow artifacts
+  # (kept 7 days) instead of published.
   dry-run:
     if: github.event_name == 'workflow_dispatch'
-    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-latest
+            args: --bundles nsis
+          - os: macos-latest
+            args: --target aarch64-apple-darwin --bundles app,dmg
+          - os: macos-latest
+            args: --target x86_64-apple-darwin --bundles app,dmg
+          - os: ubuntu-22.04
+            args: --bundles deb,appimage
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v7
@@ -34,20 +48,29 @@ jobs:
           node-version: 24
           cache: npm
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.os == 'macos-latest' && 'aarch64-apple-darwin,x86_64-apple-darwin' || '' }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: |
             src-tauri
             src-tauri/shell-ext
+      - name: Linux build dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev
       - run: npm ci
       - name: Signed build
+        shell: bash
         env:
           TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
           IMMEDIATE_MENU_PFX: ${{ secrets.IMMEDIATE_MENU_PFX }}
           IMMEDIATE_MENU_PFX_PASSWORD: ${{ secrets.IMMEDIATE_MENU_PFX_PASSWORD }}
-        run: npx tauri build --bundles nsis
-      - name: Check the signatures
+        run: npx tauri build ${{ matrix.args }}
+      - name: Check the signatures (Windows)
+        if: runner.os == 'Windows'
         shell: pwsh
         run: |
           $sig = Get-ChildItem src-tauri/target/release/bundle/nsis/*-setup.exe.sig
@@ -55,6 +78,26 @@ jobs:
           $s = Get-AuthenticodeSignature src-tauri/shell-ext/out/immediate-menu.msix
           if ($s.SignerCertificate.Subject -ne 'CN=BuiltByWestL') { throw "right-click package not signed" }
           "Updater signature and right-click package signature OK."
+      - name: Check the signatures (macOS)
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          app=$(ls -d src-tauri/target/*/release/bundle/macos/*.app | head -1)
+          codesign --verify --deep --strict "$app" && echo "Ad-hoc signature OK: $app"
+          ls src-tauri/target/*/release/bundle/macos/*.app.tar.gz.sig
+      - name: Check the signatures (Linux)
+        if: runner.os == 'Linux'
+        shell: bash
+        run: ls src-tauri/target/release/bundle/appimage/*.AppImage.sig
+      - uses: actions/upload-artifact@v7
+        with:
+          name: immediate-dry-run-${{ runner.os }}-${{ strategy.job-index }}
+          retention-days: 7
+          path: |
+            src-tauri/target/release/bundle/nsis/*-setup.exe
+            src-tauri/target/*/release/bundle/dmg/*.dmg
+            src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/appimage/*.AppImage
 
   build:
     if: github.event_name == 'push'
