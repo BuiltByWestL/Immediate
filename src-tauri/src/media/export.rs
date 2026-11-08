@@ -111,6 +111,12 @@ fn run_with_progress<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[Stri
 /// can be stopped with media_cancel (a background preview never is).
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn run_ffmpeg<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[String], total: f64, base: f64, share: f64, event: &str, cancellable: bool) -> Result<(), String> {
+    run_ffmpeg_tail(app, ffmpeg, args, total, base, share, event, cancellable).map(|_| ())
+}
+
+/// `run_ffmpeg`, returning the last lines ffmpeg printed (filters like loudnorm report there).
+#[allow(clippy::too_many_arguments)]
+fn run_ffmpeg_tail<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[String], total: f64, base: f64, share: f64, event: &str, cancellable: bool) -> Result<Vec<String>, String> {
     let mut cmd = crate::tools::quiet_command(ffmpeg);
     cmd.args(["-hide_banner", "-nostats", "-progress", "pipe:1", "-y"]).args(args);
     cmd.stdout(Stdio::piped()).stderr(Stdio::piped());
@@ -130,7 +136,7 @@ pub(crate) fn run_ffmpeg<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[
         let mut tail: Vec<String> = Vec::new();
         for line in BufReader::new(stderr).lines().map_while(Result::ok) {
             tail.push(line);
-            if tail.len() > 20 {
+            if tail.len() > 60 {
                 tail.remove(0);
             }
         }
@@ -155,7 +161,7 @@ pub(crate) fn run_ffmpeg<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[
         return Err("cancelled".into());
     }
     match status {
-        Some(Ok(s)) if s.success() => Ok(()),
+        Some(Ok(s)) if s.success() => Ok(tail),
         _ => {
             let msg = tail.iter().rev().find(|l| !l.trim().is_empty()).cloned().unwrap_or_else(|| "ffmpeg stopped".into());
             Err(msg)
@@ -165,6 +171,79 @@ pub(crate) fn run_ffmpeg<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, args: &[
 
 fn fmt_t(t: f64) -> String {
     format!("{:.6}", t.max(0.0))
+}
+
+/// The sound settings that come before loudness: volume, noise reduction, tone, leveling. The
+/// live preview plays the same steps in the same order (MediaEditor.svelte).
+pub(crate) fn shaping_chain(gain_db: f64, eq: [f64; 3], denoise: bool, compress: bool) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    if gain_db.abs() > 0.01 {
+        chain.push(format!("volume={gain_db:.2}dB"));
+    }
+    if denoise {
+        chain.push("afftdn=nf=-25".into());
+    }
+    let [bass, mid, treble] = eq;
+    if bass.abs() > 0.05 {
+        // Q 0.707 matches the Web Audio shelves heard while playing (slope 1).
+        chain.push(format!("bass=g={bass:.1}:f={BASS_HZ}:t=q:w=0.707"));
+    }
+    if mid.abs() > 0.05 {
+        chain.push(format!("equalizer=f={MID_HZ}:t=q:w={MID_Q}:g={mid:.1}"));
+    }
+    if treble.abs() > 0.05 {
+        chain.push(format!("treble=g={treble:.1}:f={TREBLE_HZ}:t=q:w=0.707"));
+    }
+    if compress {
+        chain.push("acompressor=threshold=-20dB:ratio=3:attack=15:release=250:makeup=2".into());
+    }
+    chain
+}
+
+/// "Even out loudness" as one fixed volume change: the gain (dB) that brings the track to -16
+/// LUFS. One gain for the whole file keeps the loud and quiet parts as they were (ffmpeg's
+/// one-pass loudnorm rides the level as it goes). When that gain would push peaks past -1.5 dB,
+/// `true` asks for a peak limiter after it, which touches only those peaks.
+pub(crate) fn loudness_gain(integrated: f64, true_peak: f64) -> (f64, bool) {
+    let gain = (-16.0 - integrated).clamp(-30.0, 30.0);
+    (gain, true_peak + gain > -1.5)
+}
+
+/// The filters for "Even out loudness" (see `loudness_gain`). The live preview mirrors the
+/// limiter with a fast, hard DynamicsCompressor at the same level.
+pub(crate) fn loudness_filters(integrated: f64, true_peak: f64) -> Vec<String> {
+    let (gain, limit) = loudness_gain(integrated, true_peak);
+    let mut f = vec![format!("volume={gain:.2}dB")];
+    if limit {
+        // -1.5 dB is 0.841 linear; level=0 stops alimiter from raising the result again.
+        f.push("alimiter=limit=0.841:attack=1:release=50:level=0".into());
+    }
+    f
+}
+
+/// The ffmpeg arguments that measure audio track `track` over the kept `segs`, after `chain`.
+pub(crate) fn measure_args(source: &str, segs: &[Segment], track: usize, chain: &[String]) -> Vec<String> {
+    let mut fc = String::new();
+    let mut ins = String::new();
+    for (i, s) in segs.iter().enumerate() {
+        fc.push_str(&format!("[0:a:{track}]atrim=start={}:end={},asetpts=PTS-STARTPTS[s{i}];", fmt_t(s.start), fmt_t(s.end)));
+        ins.push_str(&format!("[s{i}]"));
+    }
+    fc.push_str(&format!("{ins}concat=n={}:v=0:a=1", segs.len()));
+    for c in chain {
+        fc.push(',');
+        fc.push_str(c);
+    }
+    fc.push_str(",loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json[m]");
+    ["-i", source, "-filter_complex", &fc, "-map", "[m]", "-f", "null", "-"].iter().map(|s| s.to_string()).collect()
+}
+
+/// Reads (integrated LUFS, true peak dBTP) from loudnorm's report in ffmpeg's messages.
+pub(crate) fn parse_loudness(messages: &str) -> Result<(f64, f64), String> {
+    let json = messages.rfind('{').and_then(|a| messages[a..].find('}').map(|b| &messages[a..=a + b])).ok_or("Couldn’t measure the loudness.")?;
+    let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+    let num = |k: &str| v[k].as_str().and_then(|s| s.parse::<f64>().ok()).filter(|x| x.is_finite());
+    Ok((num("input_i").ok_or("Silent track.")?, num("input_tp").unwrap_or(0.0)))
 }
 
 /// Encoder that writes the same codec as `codec_name`, if there is one.
@@ -449,48 +528,32 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     outs.push_str(&format!("[aout{k}]"));
                 }
                 fc.push_str(&format!("{concat_in}concat=n={}:v={nv}:a={na}{outs}", segs.len()));
-                // Sound shaping on the joined result: volume, loudness, fades.
-                let mut chain: Vec<String> = Vec::new();
-                if req.gain_db.abs() > 0.01 {
-                    chain.push(format!("volume={:.2}dB", req.gain_db));
-                }
-                if req.denoise {
-                    chain.push("afftdn=nf=-25".into());
-                }
-                let [bass, mid, treble] = req.eq;
-                if bass.abs() > 0.05 {
-                    // Q 0.707 matches the Web Audio shelves heard while playing (slope 1).
-                    chain.push(format!("bass=g={bass:.1}:f={BASS_HZ}:t=q:w=0.707"));
-                }
-                if mid.abs() > 0.05 {
-                    chain.push(format!("equalizer=f={MID_HZ}:t=q:w={MID_Q}:g={mid:.1}"));
-                }
-                if treble.abs() > 0.05 {
-                    chain.push(format!("treble=g={treble:.1}:f={TREBLE_HZ}:t=q:w=0.707"));
-                }
-                if req.compress {
-                    chain.push("acompressor=threshold=-20dB:ratio=3:attack=15:release=250:makeup=2".into());
-                }
-                if req.normalize {
-                    chain.push("loudnorm=I=-16:TP=-1.5:LRA=11".into());
-                }
+                // Sound shaping on the joined result: volume, tone…, then loudness, then fades.
+                let pre = shaping_chain(req.gain_db, req.eq, req.denoise, req.compress);
+                let mut fades: Vec<String> = Vec::new();
                 if req.fade_in > 0.0 {
-                    chain.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(total)));
+                    fades.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(total)));
                 }
                 if req.fade_out > 0.0 {
                     let d = req.fade_out.min(total);
-                    chain.push(format!("afade=t=out:st={:.3}:d={d:.3}", (total - d).max(0.0)));
+                    fades.push(format!("afade=t=out:st={:.3}:d={d:.3}", (total - d).max(0.0)));
                 }
-                if !chain.is_empty() {
-                    for k in 0..na {
-                        let mut c = chain.join(",");
-                        // loudnorm works at 192 kHz internally; return to the track's own rate.
-                        if req.normalize {
-                            let sr = keep_audio[k]["sample_rate"].as_str().unwrap_or("48000");
-                            c.push_str(&format!(",aresample={sr}"));
+                // Loudness is measured first (each track on its own), then applied as one gain.
+                let measure_share = if req.normalize && na > 0 { 0.3 } else { 0.0 };
+                for k in 0..na {
+                    let mut chain = pre.clone();
+                    if req.normalize {
+                        let share = measure_share / na as f64;
+                        let tail = run_ffmpeg_tail(app, ffmpeg, &measure_args(&req.source, &segs, k, &pre), total, share * k as f64, share, "export", true)?;
+                        // A silent track has no loudness to even out; leave it as it is.
+                        if let Ok((i, tp)) = parse_loudness(&tail.join("\n")) {
+                            chain.extend(loudness_filters(i, tp));
                         }
+                    }
+                    chain.extend(fades.iter().cloned());
+                    if !chain.is_empty() {
                         fc = fc.replacen(&format!("[aout{k}]"), &format!("[aout{k}pre]"), 1);
-                        fc.push_str(&format!(";[aout{k}pre]{c}[aout{k}]"));
+                        fc.push_str(&format!(";[aout{k}pre]{}[aout{k}]", chain.join(",")));
                     }
                 }
                 let mut a: Vec<String> = vec!["-i".into(), req.source.clone(), "-filter_complex".into(), fc];
@@ -539,7 +602,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 }
                 a.extend(movflags.iter().cloned());
                 a.push(tmp_out.to_string_lossy().into_owned());
-                run_with_progress(app, ffmpeg, &a, total, 0.0, 1.0)
+                run_with_progress(app, ffmpeg, &a, total, measure_share, 1.0 - measure_share)
             }
         }
     })();
@@ -587,6 +650,31 @@ pub async fn media_grab_frame<R: Runtime>(app: AppHandle<R>, path: String, time:
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn loudness_is_one_gain_with_a_limiter_only_when_needed() {
+        // Quiet with headroom: plain gain to -16 LUFS.
+        assert_eq!(loudness_gain(-26.0, -12.0), (10.0, false));
+        // Quiet but peaky: the same gain, with the limiter catching the peaks.
+        assert_eq!(loudness_gain(-31.3, -10.0), (15.3, true));
+        assert_eq!(loudness_filters(-31.3, -10.0).len(), 2);
+        // Too loud: turned down, never limited.
+        assert_eq!(loudness_gain(-10.0, 0.0), (-6.0, false));
+        assert_eq!(loudness_gain(-70.0, -60.0).0, 30.0);
+        let report = "[Parsed_loudnorm_0 @ 0]\n{\n\t\"input_i\" : \"-21.75\",\n\t\"input_tp\" : \"-16.32\",\n\t\"input_lra\" : \"3.1\"\n}\n";
+        assert_eq!(parse_loudness(report), Ok((-21.75, -16.32)));
+        assert!(parse_loudness("{ \"input_i\" : \"-inf\" }").is_err());
+    }
+
+    #[test]
+    fn measures_only_the_kept_parts_after_the_sound_chain() {
+        let segs = [Segment { start: 0.0, end: 2.0 }, Segment { start: 5.0, end: 6.5 }];
+        let chain = shaping_chain(3.0, [6.0, 0.0, 0.0], false, true);
+        let a = measure_args("in.wav", &segs, 1, &chain).join(" ");
+        assert!(a.contains("[0:a:1]atrim=start=5.000000:end=6.500000"), "{a}");
+        assert!(a.contains("concat=n=2:v=0:a=1,volume=3.00dB,bass=g=6.0:f=200"), "{a}");
+        assert!(a.contains("acompressor") && a.ends_with("print_format=json[m] -map [m] -f null -"), "{a}");
+    }
 
     #[test]
     fn matched_video_settings() {

@@ -135,8 +135,9 @@
   });
 
   // Live sound: volume, fades, loudness, tone and leveling are heard while playing, through Web
-  // Audio nodes that follow the filters used when saving. Only noise reduction is save-only.
-  type LiveAudio = { ctx: AudioContext; gain: GainNode; fade: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode };
+  // Audio nodes in the same order as the filters used when saving (export.rs): volume → tone →
+  // leveling → loudness → fades. Only noise reduction is save-only.
+  type LiveAudio = { ctx: AudioContext; gain: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; norm: GainNode; limiter: DynamicsCompressorNode; fade: GainNode };
   let audio = $state.raw<LiveAudio | null>(null);
 
   /** Fade level at source time t, measured along the kept parts like the saved file. */
@@ -158,26 +159,32 @@
     return Math.max(0, g);
   }
 
-  // "Even out loudness": measured once (the same loudnorm measurement the save uses), heard as
-  // the gain that brings the track to -16 LUFS without passing -1.5 dB true peak.
-  let loudness = $state<{ i: number; tp: number } | null>(null);
-  let measuring = false;
+  // "Even out loudness": the save measures the kept parts after volume, tone and leveling, then
+  // applies one gain (plus a peak limiter when that gain would clip). Ask for the same whenever
+  // those settings change (after a short pause, so dragging a slider doesn't start a measurement
+  // per step); the last answer plays meanwhile.
+  let norm = $state<{ db: number; limit: boolean }>({ db: 0, limit: false });
+  let measureReq = 0;
   $effect(() => {
-    if (!media.edit.normalize || loudness || measuring) return;
-    measuring = true;
-    invoke<[number, number]>("media_loudness", { path: file.path })
-      .then(([i, tp]) => (loudness = { i, tp }))
-      .catch(() => {})
-      .finally(() => (measuring = false));
+    const e = media.edit;
+    const args = { path: file.path, segments: kept.map((s) => ({ start: s.start, end: s.end })), gainDb: e.gain, eq: [...e.eq], denoise: e.denoise, compress: e.compress };
+    if (!e.normalize) return;
+    const req = ++measureReq;
+    const t = setTimeout(() => {
+      invoke<[number, boolean]>("media_loudness", args)
+        .then(([db, limit]) => req === measureReq && (norm = { db, limit }))
+        .catch(() => {});
+    }, 400);
+    return () => clearTimeout(t);
   });
-  // Saving levels loudness after the volume change, so with it on the volume slider doesn't matter.
-  const liveGainDb = $derived(media.edit.normalize && loudness ? Math.max(-30, Math.min(30, -16 - loudness.i, -1.5 - loudness.tp)) : media.edit.gain);
+  const liveNorm = $derived(media.edit.normalize ? norm : { db: 0, limit: false });
   function connectAudio() {
     if (!el || audio) return;
     try {
       const ctx = new AudioContext();
       const src = ctx.createMediaElementSource(el);
       const gain = ctx.createGain();
+      const norm = ctx.createGain();
       const fade = ctx.createGain();
       const mk = (type: BiquadFilterType, f: number) => {
         const b = ctx.createBiquadFilter();
@@ -193,34 +200,50 @@
       comp.ratio.value = 3;
       comp.attack.value = 0.015;
       comp.release.value = 0.25;
-      src.connect(gain).connect(fade).connect(eq[0]).connect(eq[1]).connect(eq[2]);
-      gain.gain.value = Math.pow(10, liveGainDb / 20);
+      // The saved file's alimiter at -1.5 dB: hard and fast, only peaks reach it.
+      const limiter = ctx.createDynamicsCompressor();
+      limiter.threshold.value = -1.5;
+      limiter.knee.value = 0;
+      limiter.ratio.value = 20;
+      limiter.attack.value = 0.001;
+      limiter.release.value = 0.05;
+      src.connect(gain).connect(eq[0]).connect(eq[1]).connect(eq[2]);
+      fade.connect(ctx.destination);
+      gain.gain.value = Math.pow(10, media.edit.gain / 20);
+      norm.gain.value = Math.pow(10, liveNorm.db / 20);
       fade.gain.value = fadeAt(el.currentTime);
-      audio = { ctx, gain, fade, eq, comp, out: eq[2] };
-      routeCompressor();
+      audio = { ctx, gain, eq, comp, norm, limiter, fade };
+      route(media.edit.compress, liveNorm.limit);
     } catch {
       /* plays without live effects */
     }
   }
-  function routeCompressor() {
-    if (!audio) return;
-    audio.out.disconnect();
-    audio.comp.disconnect();
-    if (media.edit.compress) audio.out.connect(audio.comp).connect(audio.ctx.destination);
-    else audio.out.connect(audio.ctx.destination);
+  /** Tone → (leveling) → loudness gain → (limiter) → fades; rewired only when a switch changes. */
+  let routed = "";
+  function route(compress: boolean, limit: boolean) {
+    const a = audio;
+    const key = `${compress}${limit}`;
+    if (!a || routed === key) return;
+    routed = key;
+    for (const n of [a.eq[2], a.comp, a.norm, a.limiter]) n.disconnect();
+    (compress ? a.eq[2].connect(a.comp) : a.eq[2]).connect(a.norm);
+    (limit ? a.norm.connect(a.limiter) : a.norm).connect(a.fade);
   }
   // Follow every sound setting while playing. Read them all before checking `audio`, so the
   // effect subscribes to each one (an early return would leave it deaf to slider moves).
   $effect(() => {
-    const gain = Math.pow(10, liveGainDb / 20);
+    const gain = Math.pow(10, media.edit.gain / 20);
+    const n = Math.pow(10, liveNorm.db / 20);
+    const limit = liveNorm.limit;
     const eq = [...media.edit.eq];
     const compress = media.edit.compress;
     const a = audio;
     if (!a) return;
-    a.gain.gain.setTargetAtTime(gain, a.ctx.currentTime, 0.02);
-    eq.forEach((g, i) => a.eq[i].gain.setTargetAtTime(g, a.ctx.currentTime, 0.02));
-    void compress;
-    routeCompressor();
+    const now = a.ctx.currentTime;
+    a.gain.gain.setTargetAtTime(gain, now, 0.02);
+    a.norm.gain.setTargetAtTime(n, now, 0.05);
+    eq.forEach((g, i) => a.eq[i].gain.setTargetAtTime(g, now, 0.02));
+    route(compress, limit);
   });
   $effect(() => () => audio?.ctx.close());
 

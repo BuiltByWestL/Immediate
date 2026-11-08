@@ -152,21 +152,25 @@ pub async fn media_waveform<R: Runtime>(app: AppHandle<R>, path: String, buckets
     .await
 }
 
-/// The first audio track's loudness, for hearing "Even out loudness" live: the same loudnorm
-/// measurement the save uses, returned as (integrated LUFS, true peak dBTP).
+/// The gain (dB) "Even out loudness" will apply when saving, and whether it needs the peak
+/// limiter, for hearing it live: the same
+/// measurement the save makes, of the first audio track's kept parts after volume, noise
+/// reduction, tone and leveling.
 #[tauri::command]
-pub async fn media_loudness<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(f64, f64), String> {
+#[allow(clippy::too_many_arguments)]
+pub async fn media_loudness<R: Runtime>(app: AppHandle<R>, path: String, segments: Vec<export::Segment>, gain_db: f64, eq: [f64; 3], denoise: bool, compress: bool) -> Result<(f64, bool), String> {
     let t = tools(&app)?;
     blocking(move || {
+        let segs: Vec<export::Segment> = segments.into_iter().filter(|s| s.end - s.start > 0.01).collect();
+        if segs.is_empty() {
+            return Ok((0.0, false));
+        }
+        let chain = export::shaping_chain(gain_db, eq, denoise, compress);
         let mut cmd = crate::tools::quiet_command(&t.ffmpeg);
-        cmd.args(["-hide_banner", "-nostats", "-i"]).arg(&path);
-        cmd.args(["-map", "0:a:0", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"]);
+        cmd.args(["-hide_banner", "-nostats"]).args(export::measure_args(&path, &segs, 0, &chain));
         let out = cmd.output().map_err(|e| e.to_string())?;
-        let err = String::from_utf8_lossy(&out.stderr);
-        let json = err.rfind('{').and_then(|a| err[a..].find('}').map(|b| &err[a..=a + b])).ok_or("Couldn’t measure the loudness.")?;
-        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
-        let num = |k: &str| v[k].as_str().and_then(|s| s.parse::<f64>().ok()).filter(|x| x.is_finite());
-        Ok((num("input_i").ok_or("Silent track.")?, num("input_tp").unwrap_or(0.0)))
+        let (i, tp) = export::parse_loudness(&String::from_utf8_lossy(&out.stderr))?;
+        Ok(export::loudness_gain(i, tp))
     })
     .await
 }
