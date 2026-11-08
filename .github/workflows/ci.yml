@@ -1,9 +1,5 @@
-# Checks and test builds on every push to main.
-#
-# Minutes: the repo is private, so GitHub's free 2,000 minutes/month apply, and macOS minutes
-# count 10x (Windows 2x). Pushes therefore build Linux + Windows only (~35 counted minutes);
-# macOS builds run when started by hand (Actions > CI > Run workflow) or for a version tag.
-# Release builds with updater signatures live in release.yml (P5).
+# Checks and test builds on every push to main, on Linux, Windows and macOS (Actions minutes
+# are free for a public repository). Release builds with updater signatures live in release.yml.
 
 name: CI
 
@@ -14,11 +10,6 @@ on:
     paths-ignore: ["**.md", "LICENSE"]
   pull_request:
   workflow_dispatch:
-    inputs:
-      macos:
-        description: "Also build on macOS (counts 10x against free minutes)"
-        type: boolean
-        default: true
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -46,7 +37,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: ${{ fromJSON((startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.macos)) && '["ubuntu-22.04","windows-latest","macos-latest"]' || '["ubuntu-22.04","windows-latest"]') }}
+        os: [ubuntu-22.04, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     defaults:
       run:

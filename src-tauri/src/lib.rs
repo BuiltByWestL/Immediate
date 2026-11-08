@@ -3,6 +3,7 @@ mod files;
 mod formats;
 mod image;
 mod media;
+mod place;
 mod settings;
 mod shellmenu;
 mod text;
@@ -93,6 +94,7 @@ pub fn run() {
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(update::PendingUpdate::default())
         .manage(wm::Wm::default())
+        .manage(place::Places::default())
         .setup(|app| {
             mark("setup");
             app.manage(settings::SettingsState::load(app.handle()));
@@ -105,6 +107,8 @@ pub fn run() {
             WindowEvent::ThemeChanged(_) => {
                 chrome::apply(window.app_handle(), window);
             }
+            WindowEvent::Moved(_) | WindowEvent::Resized(_) => place::track(window),
+            WindowEvent::CloseRequested { .. } => place::save(window),
             WindowEvent::Destroyed => wm::forget(window.app_handle(), window.label()),
             _ => {}
         })

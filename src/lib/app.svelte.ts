@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { applyTheme } from "../design/theme";
-import { ALL_EXTENSIONS, isNativeImagePath } from "./formats";
+import { OPEN_FILTERS, isNativeImagePath } from "./formats";
 import { DEFAULT_SETTINGS, type Batch, type Details, type MediaFacts, type OpenedFile, type Settings } from "./types";
 
 export const inTauri = "__TAURI_INTERNALS__" in window;
@@ -214,7 +214,7 @@ export async function pickFiles() {
     const picked = await openDialog({
       multiple: true,
       directory: false,
-      filters: [{ name: "Photos, videos and audio", extensions: ALL_EXTENSIONS }],
+      filters: OPEN_FILTERS,
     });
     if (picked?.length) await openPaths(picked);
   } catch (e) {

@@ -5,8 +5,19 @@ type Group = Record<string, string>;
 type Entry = { edit: Group; view: Group };
 const kinds = { image: formats.image as Entry, video: formats.video as Entry, audio: formats.audio as Entry, document: formats.document as Entry };
 
+const extsOf = (k: Entry) => [...Object.keys(k.edit), ...Object.keys(k.view)];
+
 /** Every extension Immediate opens (for the Open dialog). */
-export const ALL_EXTENSIONS = Object.values(kinds).flatMap((k) => [...Object.keys(k.edit), ...Object.keys(k.view)]);
+export const ALL_EXTENSIONS = Object.values(kinds).flatMap(extsOf);
+
+/** The Open dialog's file-type choices: everything first, then one kind at a time. */
+export const OPEN_FILTERS = [
+  { name: "Everything Immediate opens", extensions: ALL_EXTENSIONS },
+  { name: "Photos", extensions: extsOf(kinds.image) },
+  { name: "Videos", extensions: extsOf(kinds.video) },
+  { name: "Audio", extensions: extsOf(kinds.audio) },
+  { name: "Documents", extensions: extsOf(kinds.document) },
+];
 
 // What the system webview can show by itself. Everything else needs Immediate's own decoders
 // (images, P2) or media tools (video/audio proxies, P3). Video/audio in these containers may still

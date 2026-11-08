@@ -13,7 +13,7 @@
 <div class="empty" onclick={(e) => e.target === e.currentTarget && pickFiles()}>
   <div class="prompt">
     <p class="title">Drop a file here, or click to open</p>
-    <p class="hint dim">Photos, videos and audio</p>
+    <p class="hint dim">Photos, videos, audio and documents</p>
     <div class="actions">
       <button type="button" class="btn lg primary" onclick={pickFiles} title="{mod}O">
         <FolderOpen size={16} strokeWidth={1.5} />Open file

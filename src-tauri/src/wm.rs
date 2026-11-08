@@ -87,14 +87,20 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) -> tauri:
         .inner_size(1100.0, 720.0)
         .min_inner_size(560.0, 400.0)
         .visible(false);
-    builder = match anchor.as_ref().and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?))) {
+    let cascade = match anchor.as_ref().and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?))) {
         Some((p, scale)) => {
             let p = p.to_logical::<f64>(scale);
-            builder.position(p.x + 28.0, p.y + 28.0)
+            builder = builder.position(p.x + 28.0, p.y + 28.0);
+            true
         }
-        None => builder.center(),
+        None => {
+            builder = builder.center();
+            false
+        }
     };
     let window = builder.build()?;
+    // Where and how big the last window was (only the size when cascading).
+    crate::place::restore(&window, cascade);
     // Paint the frame in the theme color before it is shown, so it never flashes white.
     let theme = crate::chrome::apply(app, &window);
     window.show()?;

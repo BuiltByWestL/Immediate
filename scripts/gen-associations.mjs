@@ -112,6 +112,10 @@ for (const e of entries) {
 }
 const macos = {
   bundle: {
+    // Ad-hoc signed ("-"): without any signature, Apple Silicon Macs call a downloaded app
+    // "damaged" with no way past it; ad-hoc signed, it opens after Open Anyway in Settings.
+    // A paid Developer ID would remove that step (zero-spend for now).
+    macOS: { signingIdentity: "-", minimumSystemVersion: "11.0" },
     fileAssociations: [...byGroup].map(([k, ext]) => {
       const [kind, editable] = k.split("|");
       return { ext, name: `${KINDS[kind]} file`, role: editable === "true" ? "Editor" : "Viewer", rank: "Alternate" };

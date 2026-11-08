@@ -76,12 +76,12 @@
   <div class="body">
     <section>
       <h3>Trim</h3>
-      <p class="hint">Drag the handles at either end of the timeline, or press <kbd>I</kbd> and <kbd>O</kbd> at the playhead.</p>
+      <p class="hint">Drag the handles at either end of the timeline, or press <kbd>Q</kbd> (start) and <kbd>E</kbd> (end) at the playhead.</p>
     </section>
 
     <section>
       <h3>Cut out a part</h3>
-      <p class="hint">Drag across the part on the timeline, then cut it out.</p>
+      <p class="hint">Drag across the part on the timeline, then press <kbd>W</kbd> or Cut out.</p>
       <div class="row">
         <button type="button" class="btn" disabled={!sel} onclick={cutSelection} title="Cut out (W or Delete)">
           <Scissors size={16} strokeWidth={1.5} />Cut out
