@@ -137,6 +137,7 @@ pub fn run() {
             media::media_probe,
             media::media_keyframes,
             media::media_waveform,
+            media::media_loudness,
             media::media_frame,
             media::media_proxy,
             media::record::rec_devices,

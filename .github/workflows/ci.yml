@@ -73,6 +73,9 @@ jobs:
       - run: npm ci
       - name: Build the UI (the Rust build embeds it)
         run: npm run build
+      - name: Build the right-click entry (Windows; bundled files must exist before Rust builds)
+        if: runner.os == 'Windows'
+        run: node scripts/build-shell-menu.mjs
       - name: Rust tests
         run: cargo test --manifest-path src-tauri/Cargo.toml
       - name: Right-click entry tests (Windows)

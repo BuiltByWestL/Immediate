@@ -40,6 +40,20 @@ export const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
     ],
   },
   {
+    group: "Editing video and audio",
+    items: [
+      [["Space", "K"], "Play / pause"],
+      [["J", "L"], "Back / forward 5 seconds"],
+      [["←", "→"], "Previous / next frame (Shift: 1 second)"],
+      [["Q"], "Trim the start to the playhead"],
+      [["E"], "Trim the end to the playhead"],
+      [["W"], "Cut out the selected part (or Delete)"],
+      [[MOD, "S"], "Save a copy next to the original"],
+      [[MOD, "Z"], "Undo"],
+      [["Esc"], "Cancel editing"],
+    ],
+  },
+  {
     group: "App",
     items: [
       [[MOD, ","], "Settings"],

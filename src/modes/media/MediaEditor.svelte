@@ -5,12 +5,12 @@
   import Pause from "@lucide/svelte/icons/pause";
   import Play from "@lucide/svelte/icons/play";
   import { onMount } from "svelte";
-  import { viewer } from "../../lib/app.svelte";
+  import { toast, viewer } from "../../lib/app.svelte";
   import { needsPreview, preview, previewUrl } from "../../lib/preview.svelte";
   import type { OpenedFile } from "../../lib/types";
   import MediaPanel from "./MediaPanel.svelte";
   import { mediaKeys } from "./keys";
-  import { commitMedia as commit, fmtTime, keptSegments, media, nextKept, totalLength } from "./session.svelte";
+  import { changeMedia, commitMedia as commit, fmtTime, keptSegments, media, nextKept, totalLength } from "./session.svelte";
   import Timeline from "./Timeline.svelte";
 
   let { file }: { file: OpenedFile } = $props();
@@ -61,6 +61,7 @@
         el.currentTime = next;
       }
       media.time = el.currentTime;
+      if (audio) audio.fade.gain.setTargetAtTime(fadeAt(el.currentTime), audio.ctx.currentTime, 0.015);
     }
     raf = requestAnimationFrame(tick);
   }
@@ -99,21 +100,30 @@
     raf = requestAnimationFrame(tick);
     viewer.media = null;
     if (needsPreview(file, media.probe)) usePreview();
-    // Keyboard: J/K/L, frame steps, I/O to trim, Delete to cut out.
+    // Keyboard: J/K/L, frame steps, Q (or I) / E (or O) to trim to the playhead, W (or Delete,
+    // handled in App) to cut out the selection.
     mediaKeys.handler = (e: KeyboardEvent) => {
-      const k = e.key;
+      const k = e.key.toLowerCase();
       const step = e.shiftKey ? 1 : 1 / fps;
-      if (k === " " || k.toLowerCase() === "k") togglePlay();
-      else if (k.toLowerCase() === "j") seek(media.time - 5);
-      else if (k.toLowerCase() === "l") seek(media.time + 5);
-      else if (k === "ArrowLeft") seek(media.time - step);
-      else if (k === "ArrowRight") seek(media.time + step);
-      else if (k.toLowerCase() === "i") {
+      if (k === " " || k === "k") togglePlay();
+      else if (k === "j") seek(media.time - 5);
+      else if (k === "l") seek(media.time + 5);
+      else if (k === "arrowleft") seek(media.time - step);
+      else if (k === "arrowright") seek(media.time + step);
+      else if (k === "q" || k === "i") {
         media.edit.trim.start = Math.min(media.time, media.edit.trim.end - 0.1);
         commit();
-      } else if (k.toLowerCase() === "o") {
+      } else if (k === "e" || k === "o") {
         media.edit.trim.end = Math.max(media.time, media.edit.trim.start + 0.1);
         commit();
+      } else if (k === "w") {
+        const s = media.selection;
+        if (!s) toast("Drag across a part of the timeline first, then press W to cut it out.");
+        else {
+          changeMedia((ed) => ed.cuts.push({ ...s }));
+          media.selection = null;
+          seek(s.end);
+        }
       } else return false;
       return true;
     };
@@ -124,15 +134,50 @@
     };
   });
 
-  // Live sound: volume and tone are heard while playing, through Web Audio filters that match
-  // the ones used when saving (fades, loudness and noise reduction apply on save only).
-  let audio: { ctx: AudioContext; gain: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode } | null = null;
+  // Live sound: volume, fades, loudness, tone and leveling are heard while playing, through Web
+  // Audio nodes that follow the filters used when saving. Only noise reduction is save-only.
+  let audio: { ctx: AudioContext; gain: GainNode; fade: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; out: AudioNode } | null = null;
+
+  /** Fade level at source time t, measured along the kept parts like the saved file. */
+  function fadeAt(t: number) {
+    const { fadeIn, fadeOut } = media.edit;
+    if (!fadeIn && !fadeOut) return 1;
+    let pos = 0;
+    for (const s of kept) {
+      if (t >= s.end) pos += s.end - s.start;
+      else {
+        pos += Math.max(0, t - s.start);
+        break;
+      }
+    }
+    const total = totalLength(kept);
+    let g = 1;
+    if (fadeIn) g *= Math.min(1, pos / Math.min(fadeIn, total));
+    if (fadeOut) g *= Math.min(1, (total - pos) / Math.min(fadeOut, total));
+    return Math.max(0, g);
+  }
+
+  // "Even out loudness": measured once (the same loudnorm measurement the save uses), heard as
+  // the gain that brings the track to -16 LUFS without passing -1.5 dB true peak.
+  let loudness = $state<{ i: number; tp: number } | null>(null);
+  let measuring = false;
+  $effect(() => {
+    if (!media.edit.normalize || loudness || measuring) return;
+    measuring = true;
+    invoke<[number, number]>("media_loudness", { path: file.path })
+      .then(([i, tp]) => (loudness = { i, tp }))
+      .catch(() => {})
+      .finally(() => (measuring = false));
+  });
+  // Saving levels loudness after the volume change, so with it on the volume slider doesn't matter.
+  const liveGainDb = $derived(media.edit.normalize && loudness ? Math.max(-30, Math.min(30, -16 - loudness.i, -1.5 - loudness.tp)) : media.edit.gain);
   function connectAudio() {
     if (!el || audio) return;
     try {
       const ctx = new AudioContext();
       const src = ctx.createMediaElementSource(el);
       const gain = ctx.createGain();
+      const fade = ctx.createGain();
       const mk = (type: BiquadFilterType, f: number) => {
         const b = ctx.createBiquadFilter();
         b.type = type;
@@ -146,8 +191,10 @@
       comp.ratio.value = 3;
       comp.attack.value = 0.015;
       comp.release.value = 0.25;
-      src.connect(gain).connect(eq[0]).connect(eq[1]).connect(eq[2]);
-      audio = { ctx, gain, eq, comp, out: eq[2] };
+      src.connect(gain).connect(fade).connect(eq[0]).connect(eq[1]).connect(eq[2]);
+      gain.gain.value = Math.pow(10, liveGainDb / 20);
+      fade.gain.value = fadeAt(el.currentTime);
+      audio = { ctx, gain, fade, eq, comp, out: eq[2] };
       routeCompressor();
     } catch {
       /* plays without live effects */
@@ -163,7 +210,7 @@
   $effect(() => {
     const e = media.edit;
     if (!audio) return;
-    audio.gain.gain.value = Math.pow(10, e.gain / 20);
+    audio.gain.gain.setTargetAtTime(Math.pow(10, liveGainDb / 20), audio.ctx.currentTime, 0.02);
     e.eq.forEach((g, i) => (audio!.eq[i].gain.value = g));
     void e.compress;
     routeCompressor();

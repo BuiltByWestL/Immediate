@@ -69,7 +69,9 @@
   }
 
   function base(kind: Shape["kind"], pts: Pt[]): Shape {
-    return { kind, pts, color: editor.color, size: kind === "text" ? sizePx * 5 : sizePx };
+    // Numbered steps have no Size control; they always use the medium size.
+    const size = kind === "text" ? sizePx * 5 : kind === "number" ? SIZES.m * Math.max(src.w, src.h) : sizePx;
+    return { kind, pts, color: editor.color, size };
   }
 
   /** Four corners of the screen-space box a..b, in source px (so boxes stay boxes on screen). */

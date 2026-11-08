@@ -152,6 +152,25 @@ pub async fn media_waveform<R: Runtime>(app: AppHandle<R>, path: String, buckets
     .await
 }
 
+/// The first audio track's loudness, for hearing "Even out loudness" live: the same loudnorm
+/// measurement the save uses, returned as (integrated LUFS, true peak dBTP).
+#[tauri::command]
+pub async fn media_loudness<R: Runtime>(app: AppHandle<R>, path: String) -> Result<(f64, f64), String> {
+    let t = tools(&app)?;
+    blocking(move || {
+        let mut cmd = crate::tools::quiet_command(&t.ffmpeg);
+        cmd.args(["-hide_banner", "-nostats", "-i"]).arg(&path);
+        cmd.args(["-map", "0:a:0", "-af", "loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json", "-f", "null", "-"]);
+        let out = cmd.output().map_err(|e| e.to_string())?;
+        let err = String::from_utf8_lossy(&out.stderr);
+        let json = err.rfind('{').and_then(|a| err[a..].find('}').map(|b| &err[a..=a + b])).ok_or("Couldn’t measure the loudness.")?;
+        let v: serde_json::Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
+        let num = |k: &str| v[k].as_str().and_then(|s| s.parse::<f64>().ok()).filter(|x| x.is_finite());
+        Ok((num("input_i").ok_or("Silent track.")?, num("input_tp").unwrap_or(0.0)))
+    })
+    .await
+}
+
 fn peaks(samples: &[i16], buckets: usize) -> Vec<f32> {
     if samples.is_empty() {
         return vec![0.0; buckets * 2];

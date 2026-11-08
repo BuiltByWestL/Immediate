@@ -83,7 +83,7 @@
       <h3>Cut out a part</h3>
       <p class="hint">Drag across the part on the timeline, then cut it out.</p>
       <div class="row">
-        <button type="button" class="btn" disabled={!sel} onclick={cutSelection} title="Delete">
+        <button type="button" class="btn" disabled={!sel} onclick={cutSelection} title="Cut out (W or Delete)">
           <Scissors size={16} strokeWidth={1.5} />Cut out
         </button>
         <button type="button" class="btn" disabled={!sel} onclick={keepSelection}>Keep only this</button>
@@ -129,6 +129,7 @@
                 <span>Reduce background noise</span>
                 <button type="button" class="switch" role="switch" aria-checked={media.edit.denoise} aria-label="Reduce background noise" onclick={() => changeMedia((e) => (e.denoise = !e.denoise))}></button>
               </div>
+              {#if media.edit.denoise}<p class="hint">Heard in the saved file, not while playing here.</p>{/if}
               <div class="toggle">
                 <span>Level out loud and quiet parts</span>
                 <button type="button" class="switch" role="switch" aria-checked={media.edit.compress} aria-label="Level out loud and quiet parts" onclick={() => changeMedia((e) => (e.compress = !e.compress))}></button>

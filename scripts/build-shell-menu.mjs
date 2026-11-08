@@ -7,6 +7,7 @@
 //   CI:    IMMEDIATE_MENU_PFX (base64 of the .pfx) and IMMEDIATE_MENU_PFX_PASSWORD
 //   local: %USERPROFILE%\.tauri\immediate-menu.pfx and immediate-menu.pfx.password
 // Without one the package is left unsigned and the Settings switch reports that it can't be added.
+// Run it once before `cargo build`/`cargo test` on Windows: tauri-build checks that bundled files exist.
 
 import { execFileSync } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";

@@ -26,6 +26,9 @@
     { id: "eraser", label: "Eraser", icon: Eraser, hint: "Click a mark to remove it." },
   ];
 
+  /** Tools with a Size control: the drawing tools, plus text. */
+  const SIZED = new Set<ToolId>(["pen", "highlighter", "arrow", "line", "rect", "ellipse", "text"]);
+
   const advanced = $derived(ui.settings.mode === "advanced");
   const tools = $derived(TOOLS.filter((t) => advanced || t.simple));
   const current = $derived(TOOLS.find((t) => t.id === editor.tool));
@@ -60,9 +63,9 @@
   </section>
 {/if}
 
-{#if editor.tool !== "eraser"}
+{#if SIZED.has(editor.tool)}
   <section>
-    <h3>Size</h3>
+    <h3>{editor.tool === "text" ? "Text size" : "Size"}</h3>
     <div class="segmented" role="radiogroup" aria-label="Size">
       {#each [["s", "Small"], ["m", "Medium"], ["l", "Large"]] as [id, label] (id)}
         <button type="button" role="radio" aria-checked={editor.size === id} onclick={() => (editor.size = id as "s" | "m" | "l")}>{label}</button>
