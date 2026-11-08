@@ -6,6 +6,8 @@
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Scissors from "@lucide/svelte/icons/scissors";
   import X from "@lucide/svelte/icons/x";
+  import Music from "@lucide/svelte/icons/music";
+  import { convertFileSrc } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { ui, updateSettings } from "../../lib/app.svelte";
   import Slider from "../image/Slider.svelte";
@@ -139,6 +141,41 @@
     if (typeof picked === "string") changeMedia((e) => (e.subFile = picked));
   }
   const fileName = (p: string) => p.split(/[\\/]/).pop();
+
+  // Audio files: tags and cover art. Tags are read from the file (any letter case) and only
+  // the ones changed here are written.
+  const TAGS = [
+    { key: "title", label: "Title" },
+    { key: "artist", label: "Artist" },
+    { key: "album", label: "Album" },
+    { key: "album_artist", label: "Album artist" },
+    { key: "date", label: "Year" },
+    { key: "track", label: "Track" },
+    { key: "genre", label: "Genre" },
+  ];
+  const original = $derived.by(() => {
+    const out: Record<string, string> = {};
+    for (const src of [media.probe?.format?.tags, audios[0]?.tags]) for (const [k, val] of Object.entries(src ?? {})) out[k.toLowerCase()] ??= String(val);
+    return out;
+  });
+  const tagValue = (k: string) => media.edit.tags[k] ?? original[k] ?? "";
+  function setTag(k: string, val: string) {
+    if (val === (original[k] ?? "")) delete media.edit.tags[k];
+    else media.edit.tags[k] = val;
+  }
+  const ext = $derived(ui.file?.ext ?? "");
+  const holdsCover = $derived(["mp3", "m4a", "m4b", "flac"].includes(ext));
+  const coverShown = $derived(media.edit.cover === "" ? null : media.edit.cover ? convertFileSrc(media.edit.cover) : media.coverUrl);
+  async function pickCover() {
+    const picked = await openDialog({ multiple: false, directory: false, filters: [{ name: "Pictures", extensions: ["jpg", "jpeg", "png", "webp", "bmp"] }] });
+    if (typeof picked === "string") changeMedia((e) => (e.cover = picked));
+  }
+
+  // Audio files: sample rate and bit depth.
+  const srcRate = $derived(Number(audios[0]?.sample_rate) || 0);
+  const srcBits = $derived(Number(audios[0]?.bits_per_raw_sample) || Number(audios[0]?.bits_per_sample) || (String(audios[0]?.codec_name).match(/(\d+)/)?.[1] ? Number(String(audios[0]?.codec_name).match(/(\d+)/)?.[1]) : 0));
+  const RATES = [44100, 48000, 96000];
+  const deep = $derived(["wav", "flac", "aif", "aiff"].includes(ext));
 </script>
 
 <aside class="panel" aria-label="Edit">
@@ -249,6 +286,53 @@
           </div>
           {#if !media.edit.keepPitch}<p class="hint">The pitch follows the speed, like a tape played faster or slower.</p>{/if}
         {/if}
+      </section>
+    {/if}
+
+    {#if advanced && !isVideo}
+      <section>
+        <h3>Tags</h3>
+        <div class="cover-row">
+          <div class="cover">
+            {#if coverShown}<img src={coverShown} alt="Cover art" />{:else}<Music size={22} strokeWidth={1.25} />{/if}
+          </div>
+          <div class="cover-actions">
+            <button type="button" class="btn" disabled={!holdsCover} onclick={pickCover}>{coverShown ? "Change cover…" : "Add cover…"}</button>
+            {#if coverShown}<button type="button" class="btn" onclick={() => changeMedia((e) => (e.cover = ""))}>Remove</button>{/if}
+          </div>
+        </div>
+        {#if !holdsCover}<p class="hint">Cover art can be saved in MP3, M4A and FLAC files.</p>{/if}
+        {#each TAGS as t (t.key)}
+          <label class="tag">
+            <span>{t.label}</span>
+            <input class="field" value={tagValue(t.key)} oninput={(e) => setTag(t.key, e.currentTarget.value)} onchange={commitMedia} spellcheck="false" />
+          </label>
+        {/each}
+      </section>
+
+      <section>
+        <h3>Format</h3>
+        <label class="tag">
+          <span>Sample rate</span>
+          <select
+            class="field"
+            value={String(media.edit.sampleRate ?? "")}
+            onchange={(e) => changeMedia((ed) => (ed.sampleRate = e.currentTarget.value ? Number(e.currentTarget.value) : null))}
+          >
+            <option value="">Same{srcRate ? ` (${srcRate / 1000} kHz)` : ""}</option>
+            {#each RATES.filter((r) => r !== srcRate) as r (r)}<option value={String(r)}>{r / 1000} kHz</option>{/each}
+          </select>
+        </label>
+        {#if deep}
+          <label class="tag">
+            <span>Bit depth</span>
+            <select class="field" value={String(media.edit.bitDepth ?? "")} onchange={(e) => changeMedia((ed) => (ed.bitDepth = e.currentTarget.value ? Number(e.currentTarget.value) : null))}>
+              <option value="">Same{srcBits ? ` (${srcBits}-bit)` : ""}</option>
+              {#each [16, 24].filter((b) => b !== srcBits) as b (b)}<option value={String(b)}>{b}-bit</option>{/each}
+            </select>
+          </label>
+        {/if}
+        <p class="hint">To save as another format (WAV, FLAC, MP3, M4A, Opus), use Save As.</p>
       </section>
     {/if}
 
@@ -450,6 +534,46 @@
   }
   .chips + .toggle {
     margin-top: var(--s2);
+  }
+  .cover-row {
+    display: flex;
+    gap: var(--s3);
+    align-items: center;
+    margin-bottom: var(--s2);
+  }
+  .cover {
+    flex: none;
+    display: grid;
+    place-items: center;
+    width: 64px;
+    height: 64px;
+    border-radius: var(--radius);
+    border: 1px solid var(--line);
+    background: var(--raised);
+    color: var(--text-dim);
+    overflow: hidden;
+  }
+  .cover img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .cover-actions {
+    display: grid;
+    gap: var(--s1);
+  }
+  .tag {
+    display: grid;
+    grid-template-columns: 96px 1fr;
+    align-items: center;
+    gap: var(--s2);
+    margin-bottom: var(--s1);
+    font-size: var(--text-sm);
+    color: var(--text-dim);
+  }
+  .tag .field {
+    min-width: 0;
+    width: 100%;
   }
   footer {
     padding: var(--s3) var(--s4);

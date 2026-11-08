@@ -33,6 +33,12 @@ export interface MediaEdit {
   keepSubs: boolean[];
   /** A subtitle file to add as a track. */
   subFile: string | null;
+  /** Audio files: changed tags (only the ones that differ from the file), the cover art (null
+   *  keeps it, "" removes it, a path replaces it), and a new sample rate / bit depth. */
+  tags: Record<string, string>;
+  cover: string | null;
+  sampleRate: number | null;
+  bitDepth: number | null;
 }
 
 export interface Range2D {
@@ -62,6 +68,10 @@ export function blankEdit(duration: number): MediaEdit {
     keepAudio: [],
     keepSubs: [],
     subFile: null,
+    tags: {},
+    cover: null,
+    sampleRate: null,
+    bitDepth: null,
   };
 }
 
@@ -90,6 +100,8 @@ export const media = $state({
   view: { start: 0, end: 0 } as Range,
   /** The crop's shape while cropping: width / height in pixels, or null for any shape. */
   cropAspect: null as number | null,
+  /** The file's own cover art (an object URL), if it has one. */
+  coverUrl: null as string | null,
 });
 
 let committed = "";
@@ -164,7 +176,11 @@ export function mediaChanged(): boolean {
       e.speed !== 1 ||
       e.keepAudio.includes(false) ||
       e.keepSubs.includes(false) ||
-      !!e.subFile)
+      !!e.subFile ||
+      Object.keys(e.tags).length > 0 ||
+      e.cover !== null ||
+      e.sampleRate !== null ||
+      e.bitDepth !== null)
   );
 }
 

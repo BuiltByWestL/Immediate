@@ -7,6 +7,9 @@
   import { closeRecorder, rec, startRecording, stopRecording, togglePause } from "../lib/record.svelte";
   import { fmtTime } from "../modes/media/session.svelte";
 
+  /** Prefix of devices that record what the computer plays (see record.rs). */
+  const SYSTEM = "System sound: ";
+
   let strip: HTMLCanvasElement;
   let width = $state(0);
 
@@ -53,10 +56,18 @@
         <Mic size={28} strokeWidth={1.75} />
       </button>
       {#if rec.devices.length > 1}
+        <!-- Microphones first; "System sound: …" entries record what this computer plays. -->
         <label class="device">
-          <span class="dim">Microphone</span>
+          <span class="dim">Record from</span>
           <select class="field" bind:value={rec.device}>
-            {#each rec.devices as d (d)}<option value={d}>{d}</option>{/each}
+            <optgroup label="Microphones">
+              {#each rec.devices.filter((d) => !d.startsWith(SYSTEM)) as d (d)}<option value={d}>{d}</option>{/each}
+            </optgroup>
+            {#if rec.devices.some((d) => d.startsWith(SYSTEM))}
+              <optgroup label="What this computer plays">
+                {#each rec.devices.filter((d) => d.startsWith(SYSTEM)) as d (d)}<option value={d}>{d.slice(SYSTEM.length)}</option>{/each}
+              </optgroup>
+            {/if}
           </select>
         </label>
       {:else if rec.devices.length === 1}

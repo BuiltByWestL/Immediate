@@ -90,6 +90,18 @@ pub struct ExportRequest {
     /// "" (the edited file), "audio" (the sound only) or "gif" (an animated GIF, no sound).
     #[serde(default)]
     output: String,
+    /// Audio files: changed tags (title, artist, album, album_artist, date, track, genre);
+    /// an empty value removes the tag.
+    #[serde(default)]
+    tags: std::collections::BTreeMap<String, String>,
+    /// Audio files: the cover art. None keeps it, "" removes it, a path uses that picture.
+    #[serde(default)]
+    cover: Option<String>,
+    /// Audio files: a new sample rate (Hz) and bit depth (16/24, for WAV, FLAC and AIFF).
+    #[serde(default)]
+    sample_rate: Option<u32>,
+    #[serde(default)]
+    bit_depth: Option<u32>,
     /// "copy" | "replace" | "path"
     target: String,
     dest: Option<String>,
@@ -388,6 +400,18 @@ fn audio_settings(s: &Value, out_index: usize) -> Vec<String> {
             a.extend([format!("-b:a:{out_index}"), (br.round() as u64).to_string()]);
         }
     }
+    // FLAC and ALAC keep the source's bit depth (filters hand them float samples otherwise).
+    if matches!(codec, "flac" | "alac") {
+        let fmt = s["sample_fmt"].as_str().unwrap_or_default();
+        if fmt.starts_with("s16") {
+            a.extend([format!("-sample_fmt:a:{out_index}"), (if codec == "alac" { "s16p" } else { "s16" }).into()]);
+        } else if fmt.starts_with("s32") {
+            a.extend([format!("-sample_fmt:a:{out_index}"), (if codec == "alac" { "s32p" } else { "s32" }).into()]);
+            if s["bits_per_raw_sample"].as_str() == Some("24") {
+                a.extend([format!("-bits_per_raw_sample:a:{out_index}"), "24".into()]);
+            }
+        }
+    }
     if let Some(sr) = s["sample_rate"].as_str() {
         a.extend([format!("-ar:a:{out_index}"), sr.into()]);
     }
@@ -442,6 +466,43 @@ pub async fn media_export<R: Runtime>(app: AppHandle<R>, req: ExportRequest) -> 
         .map_err(|e| e.to_string())??;
     let _ = app.asset_protocol_scope().allow_file(&saved);
     Ok(saved.to_string_lossy().into_owned())
+}
+
+/// One sound track's encoder settings with a chosen sample rate and bit depth (bit depth applies
+/// to WAV, AIFF and FLAC).
+fn with_format(args: Vec<String>, k: usize, ext: &str, rate: Option<u32>, depth: Option<u32>) -> Vec<String> {
+    let ar = format!("-ar:a:{k}");
+    let depth_keys = [format!("-sample_fmt:a:{k}"), format!("-bits_per_raw_sample:a:{k}")];
+    let mut out: Vec<String> = Vec::new();
+    let mut it = args.into_iter();
+    while let Some(x) = it.next() {
+        // Drop the settings being replaced (each is a flag and its value).
+        if (rate.is_some() && x == ar) || (depth.is_some() && ext == "flac" && depth_keys.contains(&x)) {
+            it.next();
+            continue;
+        }
+        out.push(x);
+    }
+    if let Some(r) = rate {
+        out.extend([ar, r.to_string()]);
+    }
+    if let Some(d) = depth.filter(|d| matches!(d, 16 | 24)) {
+        let codec = format!("-c:a:{k}");
+        let pcm = match ext {
+            "wav" | "bwf" => Some(format!("pcm_s{d}le")),
+            "aif" | "aiff" => Some(format!("pcm_s{d}be")),
+            _ => None,
+        };
+        if let (Some(pcm), Some(i)) = (pcm, out.iter().position(|x| *x == codec)) {
+            out[i + 1] = pcm;
+        } else if ext == "flac" {
+            out.extend([format!("-sample_fmt:a:{k}"), (if d == 16 { "s16" } else { "s32" }).into()]);
+            if d == 24 {
+                out.extend([format!("-bits_per_raw_sample:a:{k}"), "24".into()]);
+            }
+        }
+    }
+    out
 }
 
 fn keep(flags: &[bool], i: usize) -> bool {
@@ -528,10 +589,16 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     // Turning the picture is lossless where the container carries a display matrix; cropping
     // and speed always redraw it.
     let redraw = video_out && (crop.is_some() || sped || gif || (turned && !convert::rotates_losslessly(&ext)));
+    // A new sample rate or bit depth (audio files) means re-encoding the sound.
+    let src_rate = audio.first().and_then(|(_, s)| s["sample_rate"].as_str()?.parse::<u32>().ok());
+    let reformat = !has_video && (req.sample_rate.is_some_and(|r| Some(r) != src_rate) || req.bit_depth.is_some());
+    // Lossless sound (WAV, FLAC, ALAC) loses nothing when re-encoded, so it is always cut that
+    // way: to the exact sample, with a correct length in the header (copying FLAC keeps the old one).
+    let lossless_sound = !has_video && audio.first().is_some_and(|(_, s)| is_pcm_or_lossless(s["codec_name"].as_str().unwrap_or_default()));
     let mode = match req.mode.as_str() {
         _ if gif => "accurate",
         "smaller" if !audio_only => "smaller",
-        _ if convert_to.is_some() || shaping || redraw => "accurate",
+        _ if convert_to.is_some() || shaping || redraw || reformat || lossless_sound => "accurate",
         "accurate" => "accurate",
         // Changing the volume needs the audio re-encoded; the video can still be copied.
         _ => "lossless",
@@ -780,14 +847,15 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     }
                     for (k, (_, s)) in audio.iter().enumerate() {
                         let codec = s["codec_name"].as_str().unwrap_or_default();
-                        match &convert_to {
-                            Some(e) => a.extend(audio_for_ext(e, s, k)),
+                        let settings = match &convert_to {
+                            Some(e) => audio_for_ext(e, s, k),
                             None if !same_container && !convert::audio_fits(codec, &ext) => {
                                 let (enc, br) = convert::audio_fallback(&ext);
-                                a.extend([format!("-c:a:{k}"), enc.into(), format!("-b:a:{k}"), br.into()]);
+                                vec![format!("-c:a:{k}"), enc.into(), format!("-b:a:{k}"), br.into()]
                             }
-                            None => a.extend(audio_settings(s, k)),
-                        }
+                            None => audio_settings(s, k),
+                        };
+                        a.extend(if has_video { settings } else { with_format(settings, k, &ext, req.sample_rate, req.bit_depth) });
                     }
                 }
                 a.extend(movflags.iter().cloned());
@@ -871,6 +939,39 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
         }
     }
 
+    // Audio files: tags and cover art, in a quick copy of the result (the sound is not touched).
+    if !has_video && req.output.is_empty() {
+        let source_cover = streams(&req.probe, "video").iter().any(|v| v["disposition"]["attached_pic"] == 1);
+        let holds_cover = matches!(ext.as_str(), "mp3" | "m4a" | "m4b" | "flac");
+        let new_cover = req.cover.as_deref().filter(|c| !c.is_empty());
+        let keep_cover = req.cover.is_none() && source_cover;
+        if !req.tags.is_empty() || (holds_cover && (new_cover.is_some() || keep_cover)) {
+            let mut a: Vec<String> = vec!["-i".into(), tmp_out.to_string_lossy().into_owned()];
+            a.extend(["-map".into(), "0:a".into(), "-c".into(), "copy".into(), "-map_metadata".into(), "0".into()]);
+            if holds_cover && (new_cover.is_some() || keep_cover) {
+                let pic = new_cover.unwrap_or(&req.source);
+                a.splice(2..2, ["-i".into(), pic.to_owned()]);
+                a.extend(["-map".into(), "1:v:0".into(), "-disposition:v:0".into(), "attached_pic".into()]);
+                // JPEG and PNG go in as they are; other pictures become JPEG.
+                let as_is = keep_cover || matches!(ext_of(Path::new(pic)).as_str(), "jpg" | "jpeg" | "png");
+                if !as_is {
+                    a.extend(["-c:v".into(), "mjpeg".into(), "-q:v".into(), "2".into()]);
+                }
+            }
+            for (k, v) in &req.tags {
+                if matches!(k.as_str(), "title" | "artist" | "album" | "album_artist" | "date" | "track" | "genre" | "comment") {
+                    a.extend(["-metadata".into(), format!("{k}={v}")]);
+                }
+            }
+            a.extend(movflags.iter().cloned());
+            a.push(tmp_subs.to_string_lossy().into_owned());
+            if let Err(e) = run_quiet(ffmpeg, &a).and_then(|_| std::fs::rename(&tmp_subs, &tmp_out).map_err(|e| e.to_string())) {
+                cleanup();
+                return Err(format!("Couldn’t write the tags: {e}"));
+            }
+        }
+    }
+
     if req.target == "replace" {
         if let Err(e) = trash::delete(&source) {
             cleanup();
@@ -924,6 +1025,18 @@ mod tests {
         let report = "[Parsed_loudnorm_0 @ 0]\n{\n\t\"input_i\" : \"-21.75\",\n\t\"input_tp\" : \"-16.32\",\n\t\"input_lra\" : \"3.1\"\n}\n";
         assert_eq!(parse_loudness(report), Ok((-21.75, -16.32)));
         assert!(parse_loudness("{ \"input_i\" : \"-inf\" }").is_err());
+    }
+
+    #[test]
+    fn sample_rate_and_bit_depth() {
+        let s = |v: &[&str]| v.iter().map(|x| x.to_string()).collect::<Vec<_>>();
+        let wav = s(&["-c:a:0", "pcm_s16le", "-ar:a:0", "44100", "-ac:a:0", "2"]);
+        assert_eq!(with_format(wav.clone(), 0, "wav", Some(48000), Some(24)), s(&["-c:a:0", "pcm_s24le", "-ac:a:0", "2", "-ar:a:0", "48000"]));
+        assert_eq!(with_format(wav.clone(), 0, "wav", None, None), wav);
+        let flac = with_format(s(&["-c:a:0", "flac"]), 0, "flac", None, Some(24));
+        assert_eq!(flac, s(&["-c:a:0", "flac", "-sample_fmt:a:0", "s32", "-bits_per_raw_sample:a:0", "24"]));
+        // Lossy formats have no bit depth to set.
+        assert_eq!(with_format(s(&["-c:a:0", "aac"]), 0, "m4a", None, Some(24)), s(&["-c:a:0", "aac"]));
     }
 
     #[test]

@@ -2,6 +2,9 @@
 //! ALSA/Pulse) instead of through the webview, written straight to a 16-bit WAV in the user's
 //! Music folder ("Immediate Recordings"), with the header refreshed every second so a crash
 //! never loses what was recorded. Level and time arrive as "rec" events.
+//!
+//! On Windows, "System sound: <speakers>" records what the computer is playing (WASAPI
+//! loopback). Linux lists its "Monitor of ..." sources as ordinary inputs already.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -32,19 +35,30 @@ struct Level {
     paused: bool,
 }
 
-/// Input devices by name; the first is the system default.
+/// Names of "what the computer is playing" sources: this prefix, then the speakers' name.
+const SYSTEM: &str = "System sound: ";
+
+/// Input devices by name; the first is the system default. On Windows, each output follows as
+/// "System sound: <name>" (default speakers first).
 #[tauri::command]
 pub async fn rec_devices() -> Vec<String> {
     tauri::async_runtime::spawn_blocking(|| {
         let host = cpal::default_host();
-        let default = host.default_input_device().and_then(|d| d.description().ok().map(|x| x.name().to_owned()));
-        let mut names: Vec<String> = host
-            .input_devices()
-            .map(|it| it.filter_map(|d| d.description().ok().map(|x| x.name().to_owned())).collect())
-            .unwrap_or_default();
+        let name = |d: &cpal::Device| d.description().ok().map(|x| x.name().to_owned());
+        let default = host.default_input_device().and_then(|d| name(&d));
+        let mut names: Vec<String> = host.input_devices().map(|it| it.filter_map(|d| name(&d)).collect()).unwrap_or_default();
         if let Some(def) = default {
             names.retain(|n| *n != def);
             names.insert(0, def);
+        }
+        if cfg!(windows) {
+            let default_out = host.default_output_device().and_then(|d| name(&d));
+            let mut outs: Vec<String> = host.output_devices().map(|it| it.filter_map(|d| name(&d)).collect()).unwrap_or_default();
+            if let Some(def) = default_out {
+                outs.retain(|n| *n != def);
+                outs.insert(0, def);
+            }
+            names.extend(outs.into_iter().map(|n| format!("{SYSTEM}{n}")));
         }
         names
     })
@@ -86,34 +100,50 @@ pub async fn rec_start<R: Runtime>(app: AppHandle<R>, device: Option<String>, na
     std::thread::spawn(move || {
         let result = (|| -> Result<(), String> {
             let host = cpal::default_host();
-            let dev = match &device {
-                Some(name) => host
-                    .input_devices()
+            let named = |name: &str, d: &cpal::Device| d.description().map(|x| x.name() == name).unwrap_or(false);
+            // What the computer plays: the speakers, opened for recording (WASAPI loopback).
+            let system = device.as_deref().and_then(|d| d.strip_prefix(SYSTEM)).map(str::to_owned);
+            let (dev, supported) = if let Some(out) = &system {
+                let dev = host
+                    .output_devices()
                     .map_err(|e| e.to_string())?
-                    .find(|d| d.description().map(|x| x.name() == name).unwrap_or(false)),
-                None => None,
-            }
-            .or_else(|| host.default_input_device())
-            .ok_or("No microphone was found. Plug one in or check Windows’ privacy settings for the microphone.")?;
-            let supported = dev.default_input_config().map_err(|e| format!("The microphone can’t be opened: {e}"))?;
+                    .find(|d| named(out, d))
+                    .or_else(|| host.default_output_device())
+                    .ok_or("No speakers or headphones were found to record from.")?;
+                let cfg = dev.default_output_config().map_err(|e| format!("The system sound can’t be recorded: {e}"))?;
+                (dev, cfg)
+            } else {
+                let dev = match &device {
+                    Some(name) => host.input_devices().map_err(|e| e.to_string())?.find(|d| named(name, d)),
+                    None => None,
+                }
+                .or_else(|| host.default_input_device())
+                .ok_or("No microphone was found. Plug one in or check Windows’ privacy settings for the microphone.")?;
+                let cfg = dev.default_input_config().map_err(|e| format!("The microphone can’t be opened: {e}"))?;
+                (dev, cfg)
+            };
             let channels = supported.channels().min(2);
             let rate = supported.sample_rate();
             let spec = hound::WavSpec { channels, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
             let writer: Arc<Mutex<Option<Writer>>> = Arc::new(Mutex::new(Some(hound::WavWriter::create(&p, spec).map_err(|e| e.to_string())?)));
             let peak = Arc::new(AtomicU32::new(0));
             let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
+            // When the sound last arrived (ms since start): loopback sends nothing during silence.
+            let started = std::time::Instant::now();
+            let heard = Arc::new(std::sync::atomic::AtomicU64::new(0));
             let in_ch = supported.channels() as usize;
             let config: cpal::StreamConfig = supported.config();
 
             macro_rules! stream_for {
                 ($t:ty, $to_f32:expr) => {{
-                    let (w, pk, fr, pa) = (writer.clone(), peak.clone(), frames.clone(), paused2.clone());
+                    let (w, pk, fr, pa, hd) = (writer.clone(), peak.clone(), frames.clone(), paused2.clone(), heard.clone());
                     dev.build_input_stream::<$t, _, _>(
                         config.clone(),
                         move |data: &[$t], _| {
                             if pa.load(Ordering::Relaxed) {
                                 return;
                             }
+                            hd.store(started.elapsed().as_millis() as u64, Ordering::Relaxed);
                             let mut local_peak = 0f32;
                             if let Ok(mut g) = w.lock() {
                                 if let Some(wr) = g.as_mut() {
@@ -147,10 +177,33 @@ pub async fn rec_start<R: Runtime>(app: AppHandle<R>, device: Option<String>, na
             let _ = ready_tx.send(Ok(()));
 
             let mut ticks = 0u32;
+            // Recorded time so far (pauses excluded), to fill loopback's silent gaps.
+            let mut clock = 0f64;
+            let mut last = std::time::Instant::now();
             loop {
                 match stop_rx.recv_timeout(Duration::from_millis(50)) {
                     Ok(()) | Err(mpsc::RecvTimeoutError::Disconnected) => break,
                     Err(mpsc::RecvTimeoutError::Timeout) => {}
+                }
+                let now = std::time::Instant::now();
+                if !paused2.load(Ordering::Relaxed) {
+                    clock += (now - last).as_secs_f64();
+                }
+                last = now;
+                let quiet_ms = (started.elapsed().as_millis() as u64).saturating_sub(heard.load(Ordering::Relaxed));
+                if system.is_some() && !paused2.load(Ordering::Relaxed) && quiet_ms > 150 {
+                    let want = (clock * rate as f64) as u64;
+                    let have = frames.load(Ordering::Relaxed);
+                    if want > have {
+                        if let Ok(mut g) = writer.lock() {
+                            if let Some(w) = g.as_mut() {
+                                for _ in 0..(want - have) * channels as u64 {
+                                    let _ = w.write_sample(0i16);
+                                }
+                            }
+                        }
+                        frames.fetch_add(want - have, Ordering::Relaxed);
+                    }
                 }
                 let pk = f32::from_bits(peak.swap(0, Ordering::Relaxed));
                 let seconds = frames.load(Ordering::Relaxed) as f64 / rate as f64;

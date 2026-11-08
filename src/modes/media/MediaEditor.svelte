@@ -5,7 +5,7 @@
   import Pause from "@lucide/svelte/icons/pause";
   import Play from "@lucide/svelte/icons/play";
   import { onMount } from "svelte";
-  import { toast, viewer } from "../../lib/app.svelte";
+  import { toast, ui, viewer } from "../../lib/app.svelte";
   import { needsPreview, preview, previewUrl } from "../../lib/preview.svelte";
   import type { OpenedFile } from "../../lib/types";
   import MediaPanel from "./MediaPanel.svelte";
@@ -132,8 +132,46 @@
       cancelAnimationFrame(raf);
       mediaKeys.handler = null;
       if (still) URL.revokeObjectURL(still);
+      if (media.coverUrl) URL.revokeObjectURL(media.coverUrl);
+      media.coverUrl = null;
+      if (spectrum) URL.revokeObjectURL(spectrum);
     };
   });
+
+  // Audio: the file's cover art fills the stage; Advanced can show a spectrogram instead.
+  $effect(() => {
+    if (isVideo || !media.probe) return;
+    const hasCover = (media.probe.streams ?? []).some((s: any) => s.disposition?.attached_pic === 1);
+    if (!hasCover) return;
+    invoke<ArrayBuffer>("media_cover", { path: file.path })
+      .then((buf) => {
+        if (buf.byteLength) media.coverUrl = URL.createObjectURL(new Blob([buf], { type: "image/jpeg" }));
+      })
+      .catch(() => {});
+  });
+  const coverShown = $derived(media.edit.cover === "" ? null : media.edit.cover ? convertFileSrc(media.edit.cover) : media.coverUrl);
+  let view = $state<"cover" | "spectrum">("cover");
+  let spectrum = $state<string | null>(null);
+  let spectrumBusy = $state(false);
+  async function showSpectrum() {
+    view = "spectrum";
+    if (spectrum || spectrumBusy) return;
+    spectrumBusy = true;
+    try {
+      const dpr = window.devicePixelRatio || 1;
+      const buf = await invoke<ArrayBuffer>("media_spectrogram", { path: file.path, width: Math.round(Math.min(2048, stageW * dpr)), height: Math.round(Math.min(1024, stageH * dpr)) });
+      spectrum = URL.createObjectURL(new Blob([buf], { type: "image/png" }));
+    } catch (e) {
+      toast(`Couldn’t draw the spectrogram: ${e}`, "error");
+      view = "cover";
+    } finally {
+      spectrumBusy = false;
+    }
+  }
+  function seekSpectrum(e: MouseEvent) {
+    const r = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    seek(((e.clientX - r.left) / r.width) * media.duration);
+  }
 
   // Live sound: volume, fades, loudness, tone and leveling are heard while playing, through Web
   // Audio nodes in the same order as the filters used when saving (export.rs): volume → tone →
@@ -333,7 +371,23 @@
           {:else}This video can’t play inside Immediate. You can still trim and cut it: the picture follows where you click.{/if}
         </p>
       {:else}
-        <div class="audio-art" aria-hidden="true"><AudioLines size={40} strokeWidth={1.25} /></div>
+        {#if view === "spectrum" && spectrum}
+          <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_static_element_interactions -->
+          <div class="spectrum" onclick={seekSpectrum} title="Click to play from here">
+            <img src={spectrum} alt="Spectrogram: time across, pitch up, loudness as color" />
+            <div class="playhead" style:left="{(media.time / media.duration) * 100}%"></div>
+          </div>
+        {:else if coverShown}
+          <img class="cover-art" src={coverShown} alt="Cover art" />
+        {:else}
+          <div class="audio-art" aria-hidden="true"><AudioLines size={40} strokeWidth={1.25} /></div>
+        {/if}
+        {#if ui.settings.mode === "advanced"}
+          <div class="segmented view-switch" role="radiogroup" aria-label="Show">
+            <button type="button" role="radio" aria-checked={view === "cover"} onclick={() => (view = "cover")}>{coverShown ? "Cover" : "Sound"}</button>
+            <button type="button" role="radio" aria-checked={view === "spectrum"} onclick={showSpectrum}>{spectrumBusy ? "Drawing…" : "Spectrogram"}</button>
+          </div>
+        {/if}
         <audio
           bind:this={el}
           {src}
@@ -411,6 +465,36 @@
     font-size: var(--text-sm);
     max-width: 90%;
     text-align: center;
+  }
+  /* Below the Cover / Spectrogram switch. */
+  .cover-art {
+    inset: 52px var(--s6) var(--s6);
+    width: calc(100% - 2 * var(--s6));
+    height: calc(100% - 52px - var(--s6));
+  }
+  .spectrum {
+    position: absolute;
+    inset: 52px var(--s3) var(--s3);
+    cursor: pointer;
+  }
+  .spectrum img {
+    object-fit: fill;
+    border-radius: var(--radius);
+  }
+  .playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 1px;
+    background: #fff;
+    box-shadow: 0 0 0 1px rgb(0 0 0 / 0.4);
+    pointer-events: none;
+  }
+  .view-switch {
+    position: absolute;
+    top: var(--s3);
+    left: var(--s3);
+    z-index: 2;
   }
   .audio-art {
     display: grid;

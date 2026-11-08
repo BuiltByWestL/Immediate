@@ -244,6 +244,48 @@ pub async fn media_frame<R: Runtime>(app: AppHandle<R>, path: String, time: f64,
     Ok(tauri::ipc::Response::new(jpg))
 }
 
+/// The cover art inside an audio file, as a JPEG up to 600 px (empty when it has none).
+#[tauri::command]
+pub async fn media_cover<R: Runtime>(app: AppHandle<R>, path: String) -> Result<tauri::ipc::Response, String> {
+    let t = tools(&app)?;
+    let jpg = blocking(move || {
+        let mut cmd = crate::tools::quiet_command(&t.ffmpeg);
+        cmd.args(["-v", "error", "-i"]).arg(&path).args([
+            "-map", "0:v:0?", "-frames:v", "1", "-vf", "scale='min(600,iw)':-2", "-q:v", "3", "-f", "image2pipe", "-c:v", "mjpeg", "-",
+        ]);
+        run(cmd)
+    })
+    .await
+    .unwrap_or_default();
+    Ok(tauri::ipc::Response::new(jpg))
+}
+
+/// A spectrogram of the sound as a PNG: time across, pitch up (log scale), loudness as color.
+#[tauri::command]
+pub async fn media_spectrogram<R: Runtime>(app: AppHandle<R>, path: String, width: u32, height: u32) -> Result<tauri::ipc::Response, String> {
+    let t = tools(&app)?;
+    let png = blocking(move || {
+        let (w, h) = (width.clamp(64, 4096), height.clamp(64, 2048));
+        let mut cmd = crate::tools::quiet_command(&t.ffmpeg);
+        cmd.args(["-v", "error", "-i"]).arg(&path).args([
+            "-filter_complex",
+            &format!("[0:a:0]showspectrumpic=s={w}x{h}:legend=0:scale=log:fscale=log:color=intensity[s]"),
+            "-map",
+            "[s]",
+            "-frames:v",
+            "1",
+            "-f",
+            "image2pipe",
+            "-c:v",
+            "png",
+            "-",
+        ]);
+        run(cmd)
+    })
+    .await?;
+    Ok(tauri::ipc::Response::new(png))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
