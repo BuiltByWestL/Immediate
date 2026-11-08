@@ -152,8 +152,6 @@ pub fn run() {
             wm::open_in_new_window,
             update::update_check,
             update::update_install,
-            update::update_token_set,
-            update::update_token_present,
             shellmenu::shell_menu_status,
             shellmenu::shell_menu_set
         ])

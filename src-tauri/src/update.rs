@@ -1,15 +1,12 @@
 //! App self-update from GitHub (signed with the minisign key in tauri.conf.json).
 //!
-//! While the repo is private, both the manifest (raw.githubusercontent.com, `updates` branch)
-//! and the installer (GitHub API asset URL) need a read-only GitHub token. It is read from
-//! `IMMEDIATE_GITHUB_TOKEN`, or from a `github-token` file in the app config folder.
-//! Once the repo is public: point `endpoints` at releases/latest/download/latest.json and
-//! the token becomes unnecessary (it is simply not sent when absent).
+//! The manifest is latest.json on the public repo's `updates` branch (raw.githubusercontent.com),
+//! pointing at the release's public download URLs. No token: the repository is public.
 
 use std::sync::Mutex;
 
 use serde::Serialize;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Runtime, State};
 use tauri_plugin_updater::{Update, UpdaterExt};
 
 #[derive(Default)]
@@ -22,83 +19,8 @@ pub struct UpdateInfo {
     pub notes: Option<String>,
 }
 
-const KEY_SERVICE: &str = "Immediate";
-const KEY_USER: &str = "github-update-token";
-
-fn token_file<R: Runtime>(app: &AppHandle<R>) -> Option<std::path::PathBuf> {
-    app.path().app_config_dir().ok().map(|d| d.join("github-token"))
-}
-
-/// Where the token lives: the OS credential store on Windows and macOS (Credential Manager,
-/// Keychain); a file only this user can read on Linux. An env var overrides it (CI, tests).
-fn github_token<R: Runtime>(app: &AppHandle<R>) -> Option<String> {
-    if let Ok(t) = std::env::var("IMMEDIATE_GITHUB_TOKEN") {
-        let t = t.trim().to_owned();
-        if !t.is_empty() {
-            return Some(t);
-        }
-    }
-    #[cfg(any(windows, target_os = "macos"))]
-    if let Ok(t) = keyring::Entry::new(KEY_SERVICE, KEY_USER).and_then(|e| e.get_password()) {
-        if !t.trim().is_empty() {
-            return Some(t.trim().to_owned());
-        }
-    }
-    let t = std::fs::read_to_string(token_file(app)?).ok()?.trim().to_owned();
-    (!t.is_empty()).then_some(t)
-}
-
-/// Saves (or, with an empty string, removes) the read-only token used while the repository
-/// is private. Returns whether a token is now set.
-#[tauri::command]
-pub fn update_token_set<R: Runtime>(app: AppHandle<R>, token: String) -> Result<bool, String> {
-    let token = token.trim().to_owned();
-    #[cfg(any(windows, target_os = "macos"))]
-    {
-        let entry = keyring::Entry::new(KEY_SERVICE, KEY_USER).map_err(|e| e.to_string())?;
-        if token.is_empty() {
-            let _ = entry.delete_credential();
-        } else {
-            entry.set_password(&token).map_err(|e| e.to_string())?;
-        }
-        // Never leave an older plain-text copy behind.
-        if let Some(f) = token_file(&app) {
-            let _ = std::fs::remove_file(f);
-        }
-    }
-    #[cfg(not(any(windows, target_os = "macos")))]
-    {
-        let f = token_file(&app).ok_or("no config folder")?;
-        if token.is_empty() {
-            let _ = std::fs::remove_file(&f);
-        } else {
-            if let Some(d) = f.parent() {
-                std::fs::create_dir_all(d).map_err(|e| e.to_string())?;
-            }
-            std::fs::write(&f, &token).map_err(|e| e.to_string())?;
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let _ = std::fs::set_permissions(&f, std::fs::Permissions::from_mode(0o600));
-            }
-        }
-    }
-    Ok(github_token(&app).is_some())
-}
-
-#[tauri::command]
-pub fn update_token_present<R: Runtime>(app: AppHandle<R>) -> bool {
-    github_token(&app).is_some()
-}
-
 async fn find_update<R: Runtime>(app: &AppHandle<R>) -> Result<Option<Update>, String> {
-    let mut builder = app.updater_builder();
-    if let Some(token) = github_token(app) {
-        builder = builder
-            .header("Authorization", format!("Bearer {token}"))
-            .map_err(|e| e.to_string())?;
-    }
-    let updater = builder.build().map_err(|e| e.to_string())?;
+    let updater = app.updater_builder().build().map_err(|e| e.to_string())?;
     updater.check().await.map_err(|e| e.to_string())
 }
 

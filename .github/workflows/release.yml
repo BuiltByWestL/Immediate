@@ -104,7 +104,7 @@ jobs:
           releaseBody: See the commits since the last release.
           releaseDraft: false
           prerelease: false
-          # The manifest is published separately (private-repo aware), below.
+          # The manifest is published separately (to the updates branch), below.
           includeUpdaterJson: false
           args: ${{ matrix.args }}
 
@@ -120,5 +120,5 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           IMMEDIATE_REPO: ${{ github.repository }}
-        # Add --public once the repository is public (browser download URLs, no token needed).
-        run: node scripts/gen-latest-json.mjs ${{ github.ref_name }}
+        # Public repository: browser download URLs, no token needed.
+        run: node scripts/gen-latest-json.mjs ${{ github.ref_name }} --public
