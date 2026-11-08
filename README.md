@@ -4,6 +4,23 @@ Open any photo, video or audio file, make a quick edit, save a file. No projects
 
 Windows · macOS · Linux. Built with Tauri 2 (Rust) and Svelte 5.
 
+## What it does
+
+- **Photos:** adjust (light, color, detail), filters, crop and straighten, markup (pen, arrows, shapes, text, numbered steps, blur), saved in the same format and quality with metadata kept.
+- **Video:** trim and cut out parts losslessly (or frame-exact), sound changes heard while playing, turn / mirror / crop, speed, pick or add tracks and subtitles, make smaller for upload limits, save as GIF or save the sound only, change the format (MP4, MOV, MKV, WebM) without re-encoding where possible.
+- **Audio:** record (a microphone, or on Windows what the computer plays), trim, cut, fades, volume, even out loudness, tone, noise reduction, leveling, speed with or without the pitch, tags and cover art, spectrogram, save as WAV / FLAC / MP3 / M4A / Opus at a chosen sample rate and bit depth.
+- **Documents:** text and code, Markdown, CSV, PDF, spreadsheets and Word files.
+
+## Install
+
+Download the installer for your system from [Releases](https://github.com/BuiltByWestL/Immediate/releases). Updates install from inside the app.
+
+- **Windows:** the installer isn't code-signed yet, so SmartScreen may say "Windows protected your PC": choose **More info → Run anyway**.
+- **macOS:** the app isn't notarized (that needs a paid Apple account). The first time, open it, then go to **System Settings → Privacy & Security** and choose **Open Anyway**.
+- **Linux:** `.deb` for Debian/Ubuntu, or the AppImage for anything else.
+
+Video and audio editing use ffmpeg, which Immediate downloads by itself the first time it's needed (or uses the one already on your system).
+
 ## Develop
 
 Requirements: Node 20+, Rust stable, and the [Tauri prerequisites](https://v2.tauri.app/start/prerequisites/) for your OS (on Windows: VS Build Tools with C++ and WebView2, both already on Windows 11).
