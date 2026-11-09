@@ -1,4 +1,6 @@
-# Release: push a tag like v0.2.0 (matching the version in tauri.conf.json and package.json).
+# Release: add the version's notes to CHANGELOG.md ("## 0.3.0"), then push a tag like v0.3.0
+# (matching the version in tauri.conf.json and package.json). The notes become the release page
+# and the in-app update offer's "What's new".
 # Builds signed installers for Windows, macOS (Apple Silicon + Intel) and Linux, attaches them to
 # a GitHub release, then publishes the updater manifest (latest.json) to the `updates` branch.
 #
@@ -135,6 +137,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libxdo-dev libasound2-dev
       - run: npm ci
+      - name: Release notes (this version's section of CHANGELOG.md)
+        id: notes
+        shell: bash
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            node scripts/release-notes.mjs "${{ github.ref_name }}"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
       - uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -145,7 +156,7 @@ jobs:
         with:
           tagName: ${{ github.ref_name }}
           releaseName: Immediate ${{ github.ref_name }}
-          releaseBody: See the commits since the last release.
+          releaseBody: ${{ steps.notes.outputs.body }}
           releaseDraft: false
           prerelease: false
           # The manifest is published separately (to the updates branch), below.

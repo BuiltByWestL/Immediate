@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { openUrl } from "@tauri-apps/plugin-opener";
   import { onMount } from "svelte";
   import { inTauri, ui, updateSettings } from "../lib/app.svelte";
   import { checkForUpdates, installUpdate, updates } from "../lib/updates.svelte";
@@ -29,6 +30,7 @@
       <button type="button" class="btn" onclick={() => (updates.hidden = true)}>Later</button>
     {:else}
       <span>Immediate <span class="num">{updates.available.version}</span> is available.</span>
+      <button type="button" class="btn" onclick={() => openUrl(`https://github.com/BuiltByWestL/Immediate/releases/tag/v${updates.available?.version}`).catch(() => {})}>What’s new</button>
       <button type="button" class="btn primary" onclick={installUpdate}>Install & restart</button>
       <button type="button" class="btn" onclick={() => (updates.hidden = true)}>Later</button>
     {/if}
