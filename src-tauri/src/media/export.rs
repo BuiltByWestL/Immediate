@@ -16,6 +16,7 @@ use serde_json::Value;
 use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use super::convert::{self, Crop};
+use super::hw;
 use crate::files::unique_path;
 
 fn one() -> f64 {
@@ -87,9 +88,18 @@ pub struct ExportRequest {
     /// A subtitle file (.srt, .vtt, .ass) to add as a track, retimed to the kept parts.
     #[serde(default)]
     subtitle_file: Option<String>,
-    /// "" (the edited file), "audio" (the sound only) or "gif" (an animated GIF, no sound).
+    /// "" (the edited file), "audio" (the sound only), "gif" or "webp" (animated, no sound).
     #[serde(default)]
     output: String,
+    /// Re-encode the picture with the graphics card when one works (falls back if it fails).
+    #[serde(default)]
+    hardware: bool,
+    /// Video: the frame (source seconds) to store as the file's thumbnail (MP4, MOV, MKV).
+    #[serde(default)]
+    cover_frame: Option<f64>,
+    /// Audio files saved as a copy: the format to save in (an extension), None = the same.
+    #[serde(default)]
+    format: Option<String>,
     /// Audio files: changed tags (title, artist, album, album_artist, date, track, genre);
     /// an empty value removes the tag.
     #[serde(default)]
@@ -516,7 +526,9 @@ fn run_quiet(ffmpeg: &Path, args: &[String]) -> Result<(), String> {
         Ok(())
     } else {
         let err = String::from_utf8_lossy(&out.stderr);
-        Err(err.lines().rev().find(|l| !l.trim().is_empty()).unwrap_or("ffmpeg stopped").to_owned())
+        // The last line is often a generic "Conversion failed!"; the reason is just above it.
+        let generic = |l: &str| l.contains("Conversion failed") || l.starts_with("Error opening output") || l.trim().is_empty();
+        Err(err.lines().rev().find(|l| !generic(l)).unwrap_or("ffmpeg stopped").trim().to_owned())
     }
 }
 
@@ -540,15 +552,18 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     // Length of the result: progress and fades are measured on it.
     let out_total = total / speed;
     let gif = req.output == "gif";
+    let webp = req.output == "webp";
+    // An animated picture: no sound, no subtitles.
+    let anim = gif || webp;
     let audio_only = req.output == "audio";
     let video = streams(&req.probe, "video").into_iter().find(|v| v["disposition"]["attached_pic"] != 1);
     let has_video = video.is_some();
     let video_out = has_video && !audio_only;
-    if gif && !has_video {
-        return Err("Only a video can be saved as a GIF.".into());
+    if anim && !has_video {
+        return Err(format!("Only a video can be saved as {}.", if gif { "a GIF" } else { "an animated WebP" }));
     }
     // Tracks to write, each with its position among the file's tracks of that kind.
-    let audio: Vec<(usize, &Value)> = if req.mute || gif {
+    let audio: Vec<(usize, &Value)> = if req.mute || anim {
         vec![]
     } else {
         streams(&req.probe, "audio").into_iter().enumerate().filter(|(i, _)| keep(&req.keep_audio, *i)).take(if audio_only { 1 } else { usize::MAX }).collect()
@@ -556,7 +571,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     if audio_only && audio.is_empty() {
         return Err("There’s no sound to save: the sound is removed or every track is turned off.".into());
     }
-    let subs: Vec<(usize, &Value)> = if video_out && !gif { streams(&req.probe, "subtitle").into_iter().enumerate().filter(|(i, _)| keep(&req.keep_subs, *i)).collect() } else { vec![] };
+    let subs: Vec<(usize, &Value)> = if video_out && !anim { streams(&req.probe, "subtitle").into_iter().enumerate().filter(|(i, _)| keep(&req.keep_subs, *i)).collect() } else { vec![] };
 
     // Fades, loudness, tone and speed change the sound over the whole result, so they need the
     // frame-exact path (for audio files that costs nothing extra: audio is re-encoded either way).
@@ -564,12 +579,17 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     let shaping = !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || tone || sped);
     let turned = video_out && (!req.rotate.is_multiple_of(360) || req.flip);
     let crop = if video_out { req.crop.and_then(Crop::effective) } else { None };
-    let dest_ext = (req.target == "path").then(|| req.dest.as_deref().map(|d| ext_of(Path::new(d)))).flatten();
+    let dest_ext = match req.target.as_str() {
+        "path" => req.dest.as_deref().map(|d| ext_of(Path::new(d))),
+        // Settings → Audio → "Save audio as": a copy of an audio file in that format.
+        "copy" if !has_video && req.output.is_empty() => req.format.clone().filter(|f| !f.is_empty()),
+        _ => None,
+    };
 
     // The sound saved as another audio format is converted: Save As on an audio file, or a
     // video's sound in a type that can't hold its codec as it is.
-    let (ext, convert_to): (String, Option<String>) = if gif {
-        ("gif".into(), None)
+    let (ext, convert_to): (String, Option<String>) = if anim {
+        ((if gif { "gif" } else { "webp" }).into(), None)
     } else if audio_only {
         let codec = audio[0].1["codec_name"].as_str().unwrap_or_default();
         let natural = convert::natural_audio_ext(codec);
@@ -588,7 +608,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     let same_container = ext == src_ext;
     // Turning the picture is lossless where the container carries a display matrix; cropping
     // and speed always redraw it.
-    let redraw = video_out && (crop.is_some() || sped || gif || (turned && !convert::rotates_losslessly(&ext)));
+    let redraw = video_out && (crop.is_some() || sped || anim || (turned && !convert::rotates_losslessly(&ext)));
     // A new sample rate or bit depth (audio files) means re-encoding the sound.
     let src_rate = audio.first().and_then(|(_, s)| s["sample_rate"].as_str()?.parse::<u32>().ok());
     let reformat = !has_video && (req.sample_rate.is_some_and(|r| Some(r) != src_rate) || req.bit_depth.is_some());
@@ -596,7 +616,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     // way: to the exact sample, with a correct length in the header (copying FLAC keeps the old one).
     let lossless_sound = !has_video && audio.first().is_some_and(|(_, s)| is_pcm_or_lossless(s["codec_name"].as_str().unwrap_or_default()));
     let mode = match req.mode.as_str() {
-        _ if gif => "accurate",
+        _ if anim => "accurate",
         "smaller" if !audio_only => "smaller",
         _ if convert_to.is_some() || shaping || redraw || reformat || lossless_sound => "accurate",
         "accurate" => "accurate",
@@ -638,7 +658,10 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 let mut maps: Vec<String> = Vec::new();
                 let mut codecs: Vec<String> = vec!["-c".into(), "copy".into()];
                 if video_out {
-                    maps.extend(["-map".into(), "0:v?".into()]);
+                    // MKV and WebM can't hold attached pictures as picture tracks (MKV gets them
+                    // back as attachments at the end); MP4 and MOV keep their cover art.
+                    let pictures = if matches!(ext.as_str(), "mkv" | "webm") { "0:V?" } else { "0:v?" };
+                    maps.extend(["-map".into(), pictures.into()]);
                 }
                 for (j, (i, s)) in audio.iter().enumerate() {
                     maps.extend(["-map".into(), format!("0:a:{i}")]);
@@ -746,6 +769,9 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     if gif {
                         // 15 frames a second at up to 480 px wide, one palette for the clip.
                         chain.push("fps=15,scale='min(480,iw)':-2:flags=lanczos,split[g0][g1];[g0]palettegen=stats_mode=diff[gp];[g1][gp]paletteuse=dither=bayer:bayer_scale=4:diff_mode=rectangle".into());
+                    } else if webp {
+                        // Full color, so it can be bigger and smoother than a GIF at a similar size.
+                        chain.push("fps=20,scale='min(640,iw)':-2:flags=lanczos".into());
                     }
                     if !chain.is_empty() {
                         fc = fc.replacen("[vout]", "[vraw]", 1);
@@ -804,14 +830,21 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                         }
                     }
                 };
-                if let (Some(v), false) = (v, gif) {
+                if let (Some(v), false) = (v, anim) {
                     tags("v", 0, v);
                 }
                 for (k, (_, s)) in audio.iter().enumerate() {
                     tags("a", k, s);
                 }
+                // The picture's encoder settings sit at `a[at..at + len]`; with the graphics card,
+                // `software` holds the processor's settings to retry with if the card fails.
+                let mut picture: Option<(usize, usize, Vec<String>)> = None;
+                let pix = v.and_then(|v| v["pix_fmt"].as_str()).unwrap_or_default();
+                let hw_for = |codec: &str| if req.hardware && hw::suits(pix) { hw::encoder(ffmpeg, codec) } else { None };
                 if gif {
                     a.extend(["-loop".into(), "0".into()]);
+                } else if webp {
+                    a.extend(["-c:v".into(), "libwebp_anim".into(), "-lossless".into(), "0".into(), "-quality".into(), "75".into(), "-loop".into(), "0".into()]);
                 } else if mode == "smaller" {
                     let target_bits = req.size_mb.unwrap_or(10.0) * 8.0 * 1_000_000.0 * 0.94;
                     let audio_bps = if na > 0 { 96_000.0 * na as f64 } else { 0.0 };
@@ -833,8 +866,22 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                             a[idx] = a[idx].replacen("[vout]", "[vpre]", 1) + &format!(";[vpre]{scale}[vout]");
                         }
                         vbps = vbps.round();
-                        a.extend(["-c:v".into(), "libx264".into(), "-preset".into(), "medium".into(), "-b:v".into(), (vbps as u64).to_string()]);
-                        a.extend(["-maxrate".into(), ((vbps * 1.2) as u64).to_string(), "-bufsize".into(), ((vbps * 2.0) as u64).to_string(), "-pix_fmt".into(), "yuv420p".into()]);
+                        let mut sw: Vec<String> = vec!["-c:v".into(), "libx264".into(), "-preset".into(), "medium".into(), "-b:v".into(), (vbps as u64).to_string()];
+                        sw.extend(["-maxrate".into(), ((vbps * 1.2) as u64).to_string(), "-bufsize".into(), ((vbps * 2.0) as u64).to_string(), "-pix_fmt".into(), "yuv420p".into()]);
+                        // "Make smaller" always writes 8-bit 4:2:0, so any source suits the card.
+                        let card = if req.hardware { hw::encoder(ffmpeg, "h264") } else { None };
+                        match card {
+                            Some(enc) => {
+                                let mut s = hw::settings(enc, 0, Some(vbps as u64));
+                                // Its own rate cap, like the processor's.
+                                if let Some(i) = s.iter().position(|x| x == "-maxrate") {
+                                    s[i + 1] = ((vbps * 1.2) as u64).to_string();
+                                }
+                                picture = Some((a.len(), s.len(), sw));
+                                a.extend(s);
+                            }
+                            None => a.extend(sw),
+                        }
                     }
                     if na > 0 {
                         a.extend(["-c:a".into(), "aac".into(), "-b:a".into(), "96k".into()]);
@@ -843,7 +890,30 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     if let Some(v) = v {
                         let codec = v["codec_name"].as_str().unwrap_or_default();
                         let other = (!same_container && !convert::video_fits(codec, &ext)).then(|| convert::video_fallback(&ext));
-                        a.extend(video_settings(v, &req.probe, 0, other));
+                        let sw = video_settings(v, &req.probe, 0, other);
+                        let target = match other.unwrap_or_else(|| video_encoder(codec)) {
+                            "libx264" => "h264",
+                            "libx265" => "hevc",
+                            _ => "",
+                        };
+                        match hw_for(target) {
+                            Some(enc) => {
+                                // Same bitrate and keyframe spacing as the processor would use.
+                                let br = sw.iter().position(|x| x == "-b:v").and_then(|i| sw[i + 1].parse().ok());
+                                let mut s = hw::settings(enc, 0, br);
+                                if let Some(i) = sw.iter().position(|x| x == "-g") {
+                                    s.extend(["-g".into(), sw[i + 1].clone()]);
+                                }
+                                for flag in ["-color_primaries", "-color_trc", "-colorspace", "-color_range"] {
+                                    if let Some(i) = sw.iter().position(|x| x == flag) {
+                                        s.extend([flag.into(), sw[i + 1].clone()]);
+                                    }
+                                }
+                                picture = Some((a.len(), s.len(), sw));
+                                a.extend(s);
+                            }
+                            None => a.extend(sw),
+                        }
                     }
                     for (k, (_, s)) in audio.iter().enumerate() {
                         let codec = s["codec_name"].as_str().unwrap_or_default();
@@ -860,7 +930,14 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 }
                 a.extend(movflags.iter().cloned());
                 a.push(tmp_out.to_string_lossy().into_owned());
-                run_with_progress(app, ffmpeg, &a, out_total, measure_share, 1.0 - measure_share)
+                match (run_with_progress(app, ffmpeg, &a, out_total, measure_share, 1.0 - measure_share), picture) {
+                    // The graphics card couldn't (busy, driver, size limit): the processor can.
+                    (Err(e), Some((at, len, sw))) if e != "cancelled" => {
+                        a.splice(at..at + len, sw);
+                        run_with_progress(app, ffmpeg, &a, out_total, measure_share, 1.0 - measure_share)
+                    }
+                    (r, _) => r,
+                }
             }
         }
     })();
@@ -871,7 +948,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
 
     // Subtitles that follow the edit: the source's text tracks when the picture was re-encoded
     // (lossless saves copied them already), and an added subtitle file.
-    if video_out && !gif {
+    if video_out && !anim {
         if let Some(sub_codec) = convert::new_subtitle_codec(&ext) {
             let mut extra: Vec<ExtraSubs> = Vec::new();
             let mut add = |from: &Path, language: Option<String>, title: Option<String>, name: &str| -> Result<(), String> {
@@ -939,6 +1016,40 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
         }
     }
 
+    // Video: a chosen frame as the file's thumbnail (what Explorer, Finder and players show);
+    // MKV also gets the source's attached pictures back.
+    if video_out && !anim {
+        let cover = req.cover_frame.map(|t| t.max(0.0));
+        let done = match ext.as_str() {
+            "mp4" | "m4v" | "mov" => {
+                // A new cover; or, when the save re-encoded (dropping it), the source's own.
+                let old = attached_pictures(&req.probe).into_iter().next().filter(|_| mode != "lossless");
+                let picture = match (cover, old) {
+                    (Some(t), _) => grab_cover(ffmpeg, req, t, &work).map(Some),
+                    (None, Some((index, _, mime))) => {
+                        let file = work.join(if mime.ends_with("png") { "old-cover.png" } else { "old-cover.jpg" });
+                        run_quiet(ffmpeg, &["-i".into(), req.source.clone(), "-map".into(), format!("0:{index}"), "-c".into(), "copy".into(), "-frames:v".into(), "1".into(), file.to_string_lossy().into_owned()]).map(|_| Some(file))
+                    }
+                    (None, None) => Ok(None),
+                };
+                picture.and_then(|p| match p {
+                    Some(p) => add_mp4_cover(ffmpeg, req, &p, mode == "lossless", &tmp_out, &tmp_subs),
+                    None => Ok(()),
+                })
+            }
+            "mkv" => {
+                // Lossless saves into MKV from MKV copied the other attachments (fonts) first.
+                let fonts = if mode == "lossless" && src_ext == "mkv" { streams(&req.probe, "attachment").len() } else { 0 };
+                attach_mkv_pictures(ffmpeg, req, cover, fonts, &work, &tmp_out, &tmp_subs)
+            }
+            _ => Ok(()),
+        };
+        if let Err(e) = done {
+            cleanup();
+            return Err(format!("Couldn’t add the thumbnail: {e}"));
+        }
+    }
+
     // Audio files: tags and cover art, in a quick copy of the result (the sound is not touched).
     if !has_video && req.output.is_empty() {
         let source_cover = streams(&req.probe, "video").iter().any(|v| v["disposition"]["attached_pic"] == 1);
@@ -985,6 +1096,113 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     let _ = std::fs::remove_dir_all(&work);
     let _ = app.emit("export", Progress { progress: 1.0, eta: Some(0.0) });
     Ok(dest)
+}
+
+/// The frame at `t` as the edit shows it (turned, mirrored, cropped), as a JPEG for a thumbnail.
+fn grab_cover(ffmpeg: &Path, req: &ExportRequest, t: f64, work: &Path) -> Result<PathBuf, String> {
+    let jpg = work.join("cover.jpg");
+    let mut vf = convert::picture_filters(req.rotate, req.flip, req.crop.and_then(Crop::effective));
+    // At most 1280 px on the long side: plenty for a thumbnail, small in the file.
+    vf.push("scale='if(gte(iw,ih),min(1280,iw),-2)':'if(gte(iw,ih),-2,min(1280,ih))'".into());
+    let a: Vec<String> = vec![
+        "-ss".into(), fmt_t(t), "-i".into(), req.source.clone(), "-frames:v".into(), "1".into(),
+        "-vf".into(), vf.join(","), "-q:v".into(), "2".into(), jpg.to_string_lossy().into_owned(),
+    ];
+    run_quiet(ffmpeg, &a)?;
+    Ok(jpg)
+}
+
+/// MP4/MOV: stores a picture as the file's cover art (its thumbnail), replacing any.
+fn add_mp4_cover(ffmpeg: &Path, req: &ExportRequest, jpg: &Path, lossless: bool, tmp_out: &Path, tmp_next: &Path) -> Result<(), String> {
+    let mut a: Vec<String> = vec!["-i".into(), tmp_out.to_string_lossy().into_owned(), "-i".into(), jpg.to_string_lossy().into_owned()];
+    // Everything but an old cover (0:V is video that isn't an attached picture).
+    a.extend(["-map".into(), "0:V?".into(), "-map".into(), "0:a?".into(), "-map".into(), "0:s?".into(), "-map".into(), "0:d?".into()]);
+    a.extend(["-map".into(), "1:v:0".into(), "-c".into(), "copy".into()]);
+    // Lossless saves keep every picture track; re-encoded ones write one.
+    let pictures = if lossless { streams(&req.probe, "video").iter().filter(|v| v["disposition"]["attached_pic"] != 1).count().max(1) } else { 1 };
+    a.extend([format!("-disposition:v:{pictures}"), "attached_pic".into(), "-movflags".into(), "+faststart".into()]);
+    a.push(tmp_next.to_string_lossy().into_owned());
+    run_quiet(ffmpeg, &a)?;
+    std::fs::rename(tmp_next, tmp_out).map_err(|e| e.to_string())
+}
+
+/// Pictures attached to the source (cover art): ffmpeg reads them as picture tracks marked
+/// attached_pic. Absolute stream index, file name, MIME type.
+fn attached_pictures(probe: &Value) -> Vec<(u64, String, String)> {
+    streams(probe, "video")
+        .into_iter()
+        .filter(|v| v["disposition"]["attached_pic"] == 1)
+        .filter_map(|v| {
+            let png = v["codec_name"] == "png";
+            let name = v["tags"]["filename"].as_str().map(str::to_owned).unwrap_or_else(|| (if png { "cover.png" } else { "cover.jpg" }).into());
+            let mime = v["tags"]["mimetype"].as_str().map(str::to_owned).unwrap_or_else(|| (if png { "image/png" } else { "image/jpeg" }).into());
+            Some((v["index"].as_u64()?, name, mime))
+        })
+        .collect()
+}
+
+/// MKV: writes the source's attached pictures back as attachments (ffmpeg would otherwise turn
+/// them into video tracks), with the frame at `cover_frame` as cover.jpg in place of any cover.
+#[allow(clippy::too_many_arguments)]
+fn attach_mkv_pictures(ffmpeg: &Path, req: &ExportRequest, cover_frame: Option<f64>, fonts_copied: usize, work: &Path, tmp_out: &Path, tmp_next: &Path) -> Result<(), String> {
+    let mut files: Vec<(PathBuf, String, String)> = Vec::new();
+    for (k, (index, name, mime)) in attached_pictures(&req.probe).into_iter().enumerate() {
+        if cover_frame.is_some() && name.to_lowercase().starts_with("cover") {
+            continue;
+        }
+        let ext = if mime.ends_with("png") { "png" } else { "jpg" };
+        let file = work.join(format!("picture{k}.{ext}"));
+        run_quiet(ffmpeg, &["-i".into(), req.source.clone(), "-map".into(), format!("0:{index}"), "-c".into(), "copy".into(), "-frames:v".into(), "1".into(), file.to_string_lossy().into_owned()])?;
+        files.push((file, name, mime));
+    }
+    if let Some(t) = cover_frame {
+        files.push((grab_cover(ffmpeg, req, t, work)?, "cover.jpg".into(), "image/jpeg".into()));
+    }
+    if files.is_empty() {
+        return Ok(());
+    }
+    let mut a: Vec<String> = vec!["-i".into(), tmp_out.to_string_lossy().into_owned(), "-map".into(), "0".into(), "-c".into(), "copy".into()];
+    for (i, (file, name, mime)) in files.iter().enumerate() {
+        let n = fonts_copied + i;
+        a.extend(["-attach".into(), file.to_string_lossy().into_owned()]);
+        a.extend([format!("-metadata:s:t:{n}"), format!("mimetype={mime}"), format!("-metadata:s:t:{n}"), format!("filename={name}")]);
+    }
+    a.push(tmp_next.to_string_lossy().into_owned());
+    run_quiet(ffmpeg, &a)?;
+    std::fs::rename(tmp_next, tmp_out).map_err(|e| e.to_string())
+}
+
+/// Saves one subtitle track as an .srt next to the video, timed to the edit (the kept parts at
+/// the chosen speed), so it matches the saved video. Picture subtitles can't become text.
+#[tauri::command]
+pub async fn media_save_subtitles<R: Runtime>(app: AppHandle<R>, path: String, index: usize, segments: Vec<Segment>, speed: f64, probe: Value) -> Result<String, String> {
+    let tools = super::locate(&app).ok_or("needs-tools")?;
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        let src = PathBuf::from(&path);
+        let track = streams(&probe, "subtitle").get(index).copied().cloned().ok_or("That subtitle track isn’t in the file.")?;
+        if !convert::is_text_subtitle(track["codec_name"].as_str().unwrap_or_default()) {
+            return Err("These subtitles are pictures, so they can’t be saved as text.".to_owned());
+        }
+        let work = std::env::temp_dir().join(format!("immediate-subs-{}", std::process::id()));
+        std::fs::create_dir_all(&work).map_err(|e| e.to_string())?;
+        let srt = work.join("track.srt");
+        let pulled = run_quiet(&tools.ffmpeg, &["-i".into(), path.clone(), "-map".into(), format!("0:s:{index}"), "-c:s".into(), "srt".into(), srt.to_string_lossy().into_owned()]);
+        let text = pulled.and_then(|_| std::fs::read_to_string(&srt).map_err(|e| e.to_string()));
+        let _ = std::fs::remove_dir_all(&work);
+        let text = text?;
+        let segs: Vec<Segment> = segments.into_iter().filter(|s| s.end - s.start > 0.01).collect();
+        let speed = if speed.is_finite() && speed > 0.0 { speed.clamp(0.25, 4.0) } else { 1.0 };
+        let cues = convert::retime(&convert::parse_srt(&text), &segs, speed);
+        let stem = src.file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_default();
+        let label = track["tags"]["language"].as_str().filter(|l| *l != "und").map(str::to_owned).unwrap_or_else(|| format!("subtitles {}", index + 1));
+        let dest = unique_path(src.parent().ok_or("no folder")?, &format!("{stem} {label}"), "srt");
+        std::fs::write(&dest, convert::write_srt(&cues)).map_err(|e| e.to_string())?;
+        Ok::<_, String>(dest)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    let _ = app.asset_protocol_scope().allow_file(&saved);
+    Ok(saved.to_string_lossy().into_owned())
 }
 
 /// Saves the frame at `time` as a PNG next to the video ("clip frame 0m12s.png").

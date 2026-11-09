@@ -15,6 +15,8 @@
   const SECTIONS = [
     ["general", "General"],
     ["appearance", "Appearance"],
+    ["video", "Video"],
+    ["audio", "Audio"],
     ["tools", "Media tools"],
     ["shortcuts", "Shortcuts"],
     ["about", "About"],
@@ -84,6 +86,32 @@
   }
 
   const suffixExample = $derived(`photo${s.saveSuffix}.jpg`);
+
+  // Video: graphics-card encoders that work here (tested once, when the section opens).
+  let cards = $state<string[] | null>(null);
+  const CARD_NAMES: Record<string, string> = { nvenc: "NVIDIA", qsv: "Intel Quick Sync", amf: "AMD", videotoolbox: "Apple VideoToolbox" };
+  const cardLabel = (list: string[]) => [...new Set(list.map((e) => CARD_NAMES[e.split("_")[1]] ?? e))].join(", ");
+  $effect(() => {
+    if (ui.settingsSection !== "video" || cards || !inTauri) return;
+    invoke<string[]>("media_hw_encoders").then((l) => (cards = l)).catch(() => (cards = []));
+  });
+
+  // Audio: microphones (not "what this computer plays", which is picked when recording).
+  let mics = $state<string[]>([]);
+  $effect(() => {
+    if (ui.settingsSection !== "audio" || !inTauri) return;
+    invoke<string[]>("rec_devices").then((l) => (mics = l.filter((d) => !d.startsWith("System sound: ")))).catch(() => {});
+  });
+  const AUDIO_FORMATS = [
+    ["", "The same as the original"],
+    ["wav", "WAV"],
+    ["flac", "FLAC"],
+    ["mp3", "MP3"],
+    ["m4a", "M4A (AAC)"],
+    ["opus", "Opus"],
+    ["ogg", "OGG (Vorbis)"],
+    ["aiff", "AIFF"],
+  ] as const;
 </script>
 
 <Sheet title="Settings" width={780} flush onclose={() => (ui.dialog = null)}>
@@ -178,6 +206,66 @@
           {#if updates.phase === "error"}
             <div class="row"><span class="dim">Couldn’t install the update: {updates.error}</span></div>
           {/if}
+        </section>
+      {:else if ui.settingsSection === "video"}
+        <section>
+          <h3>Saving</h3>
+          <div class="segmented" role="radiogroup" aria-label="How video saves">
+            <button type="button" role="radio" aria-checked={s.videoMode === "lossless"} onclick={() => set({ videoMode: "lossless" })}>Lossless</button>
+            <button type="button" role="radio" aria-checked={s.videoMode === "accurate"} onclick={() => set({ videoMode: "accurate" })}>Frame-exact</button>
+          </div>
+          <p class="note">
+            {#if s.videoMode === "lossless"}
+              Cuts are instant and the quality is untouched, but each cut starts on the nearest keyframe before it (the timeline shows where).
+            {:else}
+              Cuts land on the exact frame. The video is re-encoded at the original’s quality, which takes longer.
+            {/if}
+            You can switch for one video in the editor.
+          </p>
+        </section>
+        <section>
+          <h3>Graphics card</h3>
+          <div class="row">
+            <span>Use the graphics card to re-encode</span>
+            <button type="button" class="switch" role="switch" aria-checked={s.hardwareEncode} disabled={cards !== null && !cards.length} aria-label="Use the graphics card to re-encode video" onclick={() => set({ hardwareEncode: !s.hardwareEncode })}></button>
+          </div>
+          <p class="note">
+            {#if cards === null}
+              Checking what this computer has…
+            {:else if cards.length}
+              Found: {cardLabel(cards)}. Frame-exact saves and “Make smaller” finish several times faster; files come out slightly larger at the same quality. Immediate falls back to the processor if the card can’t.
+            {:else}
+              No graphics card encoder works here, so video is always encoded by the processor.
+            {/if}
+          </p>
+        </section>
+      {:else if ui.settingsSection === "audio"}
+        <section>
+          <h3>Recording</h3>
+          <label class="row">
+            <span>Microphone</span>
+            <select class="field" value={s.recordDevice} onchange={(e) => set({ recordDevice: e.currentTarget.value })}>
+              <option value="">The system’s default</option>
+              {#each mics as m (m)}<option value={m}>{m}</option>{/each}
+              {#if s.recordDevice && !mics.includes(s.recordDevice)}<option value={s.recordDevice}>{s.recordDevice} (not connected)</option>{/if}
+            </select>
+          </label>
+        </section>
+        <section>
+          <h3>Saving</h3>
+          <label class="row">
+            <span>Save audio as</span>
+            <select class="field" value={s.audioFormat} onchange={(e) => set({ audioFormat: e.currentTarget.value as Settings["audioFormat"] })}>
+              {#each AUDIO_FORMATS as [v, label] (v)}<option value={v}>{label}</option>{/each}
+            </select>
+          </label>
+          <p class="note">
+            {#if s.audioFormat}
+              Save converts audio files to {AUDIO_FORMATS.find((f) => f[0] === s.audioFormat)?.[1]}. Replace original always keeps the original’s format.
+            {:else}
+              Save keeps each file’s own format and quality. Save As can still pick another.
+            {/if}
+          </p>
         </section>
       {:else if ui.settingsSection === "appearance"}
         <section>

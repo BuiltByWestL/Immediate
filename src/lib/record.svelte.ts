@@ -2,7 +2,7 @@
 
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { openPaths, toast } from "./app.svelte";
+import { openPaths, toast, ui, updateSettings } from "./app.svelte";
 
 export const rec = $state({
   open: false,
@@ -25,7 +25,10 @@ export async function openRecorder() {
   rec.seconds = 0;
   rec.history = [];
   rec.devices = await invoke<string[]>("rec_devices").catch(() => []);
-  if (!rec.devices.includes(rec.device)) rec.device = rec.devices[0] ?? "";
+  // Settings → Audio → Microphone, else the last one used here, else the system's default.
+  const preferred = ui.settings.recordDevice;
+  if (preferred && rec.devices.includes(preferred)) rec.device = preferred;
+  else if (!rec.devices.includes(rec.device)) rec.device = rec.devices[0] ?? "";
 }
 
 export function closeRecorder() {
@@ -48,6 +51,10 @@ export async function startRecording() {
   });
   try {
     await invoke("rec_start", { device: rec.device || null, name: name() });
+    // A microphone picked here becomes the one to start with next time.
+    if (rec.device && !rec.device.startsWith("System sound: ") && rec.device !== ui.settings.recordDevice && ui.settings.recordDevice !== "") {
+      updateSettings({ recordDevice: rec.device });
+    }
     rec.phase = "recording";
     rec.paused = false;
   } catch (e) {

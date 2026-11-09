@@ -154,6 +154,8 @@ pub fn run() {
             media::export::media_export,
             media::export::media_cancel,
             media::export::media_grab_frame,
+            media::export::media_save_subtitles,
+            media::hw::media_hw_encoders,
             wm::inbox_take,
             wm::open_in_new_window,
             update::update_check,

@@ -4,7 +4,7 @@
   // scroll to zoom.
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import { commitMedia, fmtTime, keptSegments, media, snappedSegments } from "./session.svelte";
+  import { commitMedia, fmtTime, keptSegments, liveSplits, media, partAt, snappedSegments } from "./session.svelte";
 
   let { path, video, seek }: { path: string; video: boolean; seek: (t: number) => void } = $props();
 
@@ -172,6 +172,26 @@
       }
     }
 
+    // Split marks: a dashed line with a notch on the ruler.
+    c.fillStyle = text;
+    c.strokeStyle = text;
+    c.lineWidth = 1;
+    for (const t of liveSplits()) {
+      const x = Math.round(t2x(t)) + 0.5;
+      if (x < 0 || x > width) continue;
+      c.setLineDash([3, 3]);
+      c.beginPath();
+      c.moveTo(x, top);
+      c.lineTo(x, top + bodyH);
+      c.stroke();
+      c.setLineDash([]);
+      c.beginPath();
+      c.moveTo(x - 4, top);
+      c.lineTo(x + 4, top);
+      c.lineTo(x, top + 5);
+      c.fill();
+    }
+
     // Selection.
     if (media.selection) {
       const x0 = t2x(media.selection.start), x1 = t2x(media.selection.end);
@@ -256,6 +276,11 @@
     drag = null;
   }
 
+  /** Double-click picks the part around that point: between split marks, or the whole kept part. */
+  function ondblclick(e: MouseEvent) {
+    media.selection = partAt(Math.max(0, Math.min(media.duration, x2t(e.offsetX))));
+  }
+
   function onwheel(e: WheelEvent) {
     e.preventDefault();
     const span = media.view.end - media.view.start;
@@ -279,11 +304,12 @@
     bind:this={canvas}
     style:width="{width}px"
     style:height="{HEIGHT}px"
-    aria-label="Timeline: drag the handles at either end to trim, drag across a part to select it"
+    aria-label="Timeline: drag the handles at either end to trim, drag across a part or double-click it to select it"
     {onpointerdown}
     {onpointermove}
     {onpointerup}
     onpointercancel={() => (drag = null)}
+    {ondblclick}
     {onwheel}
   ></canvas>
 </div>

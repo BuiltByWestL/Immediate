@@ -10,7 +10,7 @@
   import type { OpenedFile } from "../../lib/types";
   import MediaPanel from "./MediaPanel.svelte";
   import { mediaKeys } from "./keys";
-  import { changeMedia, commitMedia as commit, fmtTime, keptSegments, media, nextKept, totalLength } from "./session.svelte";
+  import { commitMedia as commit, cutSelection, fmtTime, keptSegments, media, nextKept, splitAt, totalLength } from "./session.svelte";
   import CropFrame from "./CropFrame.svelte";
   import Timeline from "./Timeline.svelte";
 
@@ -101,8 +101,8 @@
     raf = requestAnimationFrame(tick);
     viewer.media = null;
     if (needsPreview(file, media.probe)) usePreview();
-    // Keyboard: J/K/L, frame steps, Q (or I) / E (or O) to trim to the playhead, W (or Delete,
-    // handled in App) to cut out the selection.
+    // Keyboard: J/K/L, frame steps, Q (or I) / E (or O) to trim to the playhead, W to cut out
+    // the selection (Delete too, handled in App) or, with nothing selected, split at the playhead.
     mediaKeys.handler = (e: KeyboardEvent) => {
       const k = e.key.toLowerCase();
       const step = e.shiftKey ? 1 : 1 / fps;
@@ -118,13 +118,10 @@
         media.edit.trim.end = Math.max(media.time, media.edit.trim.start + 0.1);
         commit();
       } else if (k === "w") {
-        const s = media.selection;
-        if (!s) toast("Drag across a part of the timeline first, then press W to cut it out.");
-        else {
-          changeMedia((ed) => ed.cuts.push({ ...s }));
-          media.selection = null;
-          seek(s.end);
-        }
+        // With a part picked: cut it out. Without: split at the playhead.
+        const to = cutSelection();
+        if (to != null) seek(to);
+        else if (!splitAt(media.time)) toast("Move the playhead into a kept part to split there, or drag across a part to cut it out.");
       } else return false;
       return true;
     };

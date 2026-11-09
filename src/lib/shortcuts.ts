@@ -47,7 +47,7 @@ export const SHORTCUTS: { group: string; items: [string[], string][] }[] = [
       [["←", "→"], "Previous / next frame (Shift: 1 second)"],
       [["Q"], "Trim the start to the playhead"],
       [["E"], "Trim the end to the playhead"],
-      [["W"], "Cut out the selected part (or Delete)"],
+      [["W"], "Cut out the selected part (or Delete); with nothing selected, split at the playhead"],
       [[MOD, "S"], "Save a copy next to the original"],
       [[MOD, "Z"], "Undo"],
       [["Esc"], "Cancel editing"],

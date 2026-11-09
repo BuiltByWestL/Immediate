@@ -57,8 +57,8 @@ function containersFor(videoCodec: string): string[] {
   return out;
 }
 
-/** "": the edited file. "audio": only its sound. "gif": an animated GIF. */
-export type MediaOutput = "" | "audio" | "gif";
+/** "": the edited file. "audio": only its sound. "gif" / "webp": an animated picture. */
+export type MediaOutput = "" | "audio" | "gif" | "webp";
 
 export async function saveMedia(target: "copy" | "as" | "replace", output: MediaOutput = "") {
   const file = ui.file;
@@ -72,7 +72,10 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
   const hasVideo = !!video;
   // GIFs and a video's sound go next to the original (the saver picks the sound's file type).
   if (output) target = file.temporary ? "as" : "copy";
-  const outExt = output === "gif" ? "gif" : output === "audio" ? "m4a" : media.mode === "smaller" ? (hasVideo ? "mp4" : "m4a") : file.ext;
+  // Settings → Audio → "Save audio as" (a copy of an audio file in that format).
+  const format = !hasVideo && !output && target !== "replace" && media.mode !== "smaller" && ui.settings.audioFormat ? ui.settings.audioFormat : null;
+  const outExt =
+    output === "gif" || output === "webp" ? output : output === "audio" ? "m4a" : media.mode === "smaller" ? (hasVideo ? "mp4" : "m4a") : (format ?? file.ext);
   // Lossless parts start on keyframes, exactly as the timeline shows.
   const segments = media.mode === "lossless" && hasVideo ? snappedSegments(kept, media.keyframes) : kept;
   let dest: string | null = null;
@@ -87,7 +90,7 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
         : !hasVideo || output === "audio"
           ? media.mode === "smaller" && !output
             ? []
-            : ["wav", "flac", "mp3", "m4a", "opus"]
+            : ["wav", "flac", "mp3", "m4a", "opus", "ogg", "aiff"]
           : media.mode === "smaller"
             ? []
             : containersFor(video.codec_name);
@@ -146,6 +149,9 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
         cover: media.edit.cover,
         sampleRate: media.edit.sampleRate,
         bitDepth: media.edit.bitDepth,
+        coverFrame: media.edit.coverFrame,
+        hardware: ui.settings.hardwareEncode,
+        format: target === "copy" ? format : null,
         output,
         target: target === "as" ? "path" : target,
         dest,
@@ -170,6 +176,18 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
 
 export function cancelSave() {
   invoke("media_cancel").catch(() => {});
+}
+
+/** Saves subtitle track `index` as an .srt next to the video, timed to the edit. */
+export async function saveSubtitles(index: number) {
+  const file = ui.file;
+  if (!file) return;
+  try {
+    const saved = await invoke<string>("media_save_subtitles", { path: file.path, index, segments: keptSegments(), speed: media.edit.speed, probe: media.probe });
+    toast(`Saved “${saved.split(/[\\/]/).pop()}”`, undefined, { label: "Show in folder", run: () => invoke("reveal", { path: saved }) });
+  } catch (e) {
+    toast(String(e), "error");
+  }
 }
 
 export async function grabFrame() {

@@ -32,6 +32,18 @@ pub struct Settings {
     pub remove_location: bool,
     pub info_open: bool,
     pub filmstrip: bool,
+    /// How video saves by default: "lossless" (cuts on keyframes) or "accurate" (frame-exact).
+    pub video_mode: String,
+    /// Re-encode video with the graphics card (NVENC, Quick Sync, AMF, VideoToolbox) when one works.
+    pub hardware_encode: bool,
+    /// Microphone the recorder starts with ("" = the system's default).
+    pub record_device: String,
+    /// Format audio files are saved in: "" (the same as the original) or an extension.
+    pub audio_format: String,
+    /// Keep Immediate running with no windows open, so the next file opens instantly.
+    pub keep_ready: bool,
+    /// When the last automatic update check ran (milliseconds since 1970), to check once a day.
+    pub last_update_check: u64,
 }
 
 impl Default for Settings {
@@ -50,6 +62,12 @@ impl Default for Settings {
             remove_location: false,
             info_open: false,
             filmstrip: true,
+            video_mode: "lossless".into(),
+            hardware_encode: false,
+            record_device: String::new(),
+            audio_format: String::new(),
+            keep_ready: false,
+            last_update_check: 0,
         }
     }
 }
@@ -66,6 +84,12 @@ impl Settings {
         }
         if self.theme.is_empty() {
             self.theme = d.theme;
+        }
+        if !matches!(self.video_mode.as_str(), "lossless" | "accurate") {
+            self.video_mode = d.video_mode;
+        }
+        if !matches!(self.audio_format.as_str(), "" | "wav" | "flac" | "mp3" | "m4a" | "opus" | "ogg" | "aiff") {
+            self.audio_format = d.audio_format;
         }
         self
     }
@@ -147,7 +171,7 @@ mod tests {
 
     #[test]
     fn invalid_values_are_repaired() {
-        let s = parse(r#"{ "mode": "expert", "font": "comic", "theme": "" }"#);
+        let s = parse(r#"{ "mode": "expert", "font": "comic", "theme": "", "videoMode": "fast", "audioFormat": "exe" }"#);
         assert_eq!(s, Settings::default());
         assert_eq!(parse("not json"), Settings::default());
     }

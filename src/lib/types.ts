@@ -14,6 +14,12 @@ export interface Settings {
   removeLocation: boolean;
   infoOpen: boolean;
   filmstrip: boolean;
+  videoMode: "lossless" | "accurate";
+  hardwareEncode: boolean;
+  recordDevice: string;
+  audioFormat: "" | "wav" | "flac" | "mp3" | "m4a" | "opus" | "ogg" | "aiff";
+  keepReady: boolean;
+  lastUpdateCheck: number;
 }
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -30,6 +36,12 @@ export const DEFAULT_SETTINGS: Settings = {
   removeLocation: false,
   infoOpen: false,
   filmstrip: true,
+  videoMode: "lossless",
+  hardwareEncode: false,
+  recordDevice: "",
+  audioFormat: "",
+  keepReady: false,
+  lastUpdateCheck: 0,
 };
 
 export type Kind = "image" | "video" | "audio" | "document";

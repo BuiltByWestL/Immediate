@@ -1,6 +1,8 @@
 // Video/audio editing session. The edit is: trim (keep start..end) minus cut-out ranges, all in
 // source time. Nothing touches the file until Save.
 
+import { ui } from "../../lib/app.svelte";
+
 export interface Range {
   start: number;
   end: number;
@@ -9,6 +11,9 @@ export interface Range {
 export interface MediaEdit {
   trim: Range;
   cuts: Range[];
+  /** Split marks (source seconds). They change nothing by themselves; double-clicking
+   *  between two of them (or a split and an end) picks that part, ready to cut out. */
+  splits: number[];
   mute: boolean;
   /** Volume change in dB. */
   gain: number;
@@ -33,6 +38,8 @@ export interface MediaEdit {
   keepSubs: boolean[];
   /** A subtitle file to add as a track. */
   subFile: string | null;
+  /** Video: the frame (source seconds) saved as the file's thumbnail, or null to leave it. */
+  coverFrame: number | null;
   /** Audio files: changed tags (only the ones that differ from the file), the cover art (null
    *  keeps it, "" removes it, a path replaces it), and a new sample rate / bit depth. */
   tags: Record<string, string>;
@@ -52,6 +59,7 @@ export function blankEdit(duration: number): MediaEdit {
   return {
     trim: { start: 0, end: duration },
     cuts: [],
+    splits: [],
     mute: false,
     gain: 0,
     fadeIn: 0,
@@ -68,6 +76,7 @@ export function blankEdit(duration: number): MediaEdit {
     keepAudio: [],
     keepSubs: [],
     subFile: null,
+    coverFrame: null,
     tags: {},
     cover: null,
     sampleRate: null,
@@ -114,7 +123,8 @@ export function startMediaEdit(probe: any, duration: number) {
   media.past = [];
   media.future = [];
   media.selection = null;
-  media.mode = "lossless";
+  // Settings → Video → how video saves by default.
+  media.mode = ui.settings.videoMode === "accurate" ? "accurate" : "lossless";
   media.view = { start: 0, end: duration };
   media.active = true;
   committed = JSON.stringify(media.edit);
@@ -177,6 +187,7 @@ export function mediaChanged(): boolean {
       e.keepAudio.includes(false) ||
       e.keepSubs.includes(false) ||
       !!e.subFile ||
+      e.coverFrame !== null ||
       Object.keys(e.tags).length > 0 ||
       e.cover !== null ||
       e.sampleRate !== null ||
@@ -214,6 +225,42 @@ export function keptSegments(e: MediaEdit = media.edit): Range[] {
   }
   if (e.trim.end > at) out.push({ start: at, end: e.trim.end });
   return out.filter((s) => s.end - s.start > 0.01);
+}
+
+/** Split marks that still sit inside a kept part. */
+export function liveSplits(e: MediaEdit = media.edit): number[] {
+  const kept = keptSegments(e);
+  return [...new Set(e.splits)].filter((t) => kept.some((s) => t > s.start + 0.01 && t < s.end - 0.01)).sort((a, b) => a - b);
+}
+
+/** Splits at `t`. False when `t` isn't inside a kept part (or a split is already there). */
+export function splitAt(t: number): boolean {
+  const kept = keptSegments();
+  if (!kept.some((s) => t > s.start + 0.05 && t < s.end - 0.05)) return false;
+  if (media.edit.splits.some((x) => Math.abs(x - t) < 0.05)) return false;
+  changeMedia((e) => (e.splits = [...liveSplits(e), t].sort((a, b) => a - b)));
+  return true;
+}
+
+/** The part around `t`: between split marks (or a split and the end of its kept part), or the
+ *  whole kept part when no split is inside it. Null in a removed part. */
+export function partAt(t: number): Range | null {
+  const part = keptSegments().find((s) => t >= s.start && t < s.end);
+  if (!part) return null;
+  const splits = liveSplits().filter((x) => x > part.start && x < part.end);
+  const edges = [part.start, ...splits, part.end];
+  for (let i = 0; i < edges.length - 1; i++) if (t >= edges[i] && t < edges[i + 1]) return { start: edges[i], end: edges[i + 1] };
+  return null;
+}
+
+/** Cuts out the selection. Returns where to put the playhead afterwards. */
+export function cutSelection(): number | null {
+  const s = media.selection;
+  if (!s) return null;
+  const cut = { ...s };
+  changeMedia((e) => e.cuts.push(cut));
+  media.selection = null;
+  return cut.end;
 }
 
 /** Where lossless cuts really land: each kept part starts at the keyframe at or before it. */

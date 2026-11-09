@@ -5,14 +5,17 @@
   import RotateCcw from "@lucide/svelte/icons/rotate-ccw";
   import RotateCw from "@lucide/svelte/icons/rotate-cw";
   import Scissors from "@lucide/svelte/icons/scissors";
+  import SquareSplitHorizontal from "@lucide/svelte/icons/square-split-horizontal";
   import X from "@lucide/svelte/icons/x";
   import Music from "@lucide/svelte/icons/music";
+  import Download from "@lucide/svelte/icons/download";
+  import Image from "@lucide/svelte/icons/image";
   import { convertFileSrc } from "@tauri-apps/api/core";
   import { open as openDialog } from "@tauri-apps/plugin-dialog";
   import { ui, updateSettings } from "../../lib/app.svelte";
   import Slider from "../image/Slider.svelte";
-  import { grabFrame } from "./actions";
-  import { blankEdit, changeMedia, commitMedia, fmtTime, keptSegments, media, pictureChanged, snappedSegments, totalLength, type Range2D } from "./session.svelte";
+  import { grabFrame, saveSubtitles } from "./actions";
+  import { blankEdit, changeMedia, commitMedia, cutSelection, fmtTime, keptSegments, media, pictureChanged, snappedSegments, splitAt, totalLength, type Range2D } from "./session.svelte";
 
   let { isVideo, seek }: { isVideo: boolean; seek: (t: number) => void } = $props();
 
@@ -20,13 +23,12 @@
   const kept = $derived(keptSegments());
   const sel = $derived(media.selection);
 
-  function cutSelection() {
-    if (!sel) return;
-    const s = { ...sel };
-    changeMedia((e) => e.cuts.push(s));
-    media.selection = null;
-    seek(s.end);
+  function cutOut() {
+    const to = cutSelection();
+    if (to != null) seek(to);
   }
+
+  const canSplit = $derived(kept.some((s) => media.time > s.start + 0.05 && media.time < s.end - 0.05));
 
   function keepSelection() {
     if (!sel) return;
@@ -53,6 +55,7 @@
   const cname = (c: string) => NAMES[c] ?? (c?.startsWith("pcm_") ? "PCM" : c?.toUpperCase());
   const mbps = (b: any) => (Number(b) ? `${(Number(b) / 1e6).toFixed(1)} Mb/s` : "");
   const container = $derived((ui.file?.ext ?? "").toUpperCase());
+  const chapters = $derived((media.probe?.chapters ?? []).length > 0);
 
   /** Saving redraws the picture (no lossless cuts): crop, speed, or turning outside MP4/MOV. */
   const redraws = $derived(
@@ -67,6 +70,7 @@
     if (media.edit.mute) parts.push("no sound");
     parts.push(container);
     if (subs.length && media.mode === "lossless") parts.push(subs.length > 1 ? `${subs.length} subtitle tracks` : "subtitles");
+    if (media.mode === "lossless") parts.push(chapters ? "chapters and details kept" : "details kept");
     return parts.join(" · ");
   });
 
@@ -121,6 +125,8 @@
   const cropping = $derived(media.edit.crop !== null);
 
   // Tracks.
+  const THUMB_TYPES = ["mp4", "m4v", "mov", "mkv"];
+  const textSub = (s: any) => ["subrip", "srt", "ass", "ssa", "webvtt", "mov_text", "text"].includes(s.codec_name);
   function trackName(s: any, kind: string, i: number, count: number) {
     const bits = [count > 1 ? `${kind} ${i + 1}` : kind];
     const lang = s.tags?.language;
@@ -187,11 +193,17 @@
 
     <section>
       <h3>Cut out a part</h3>
-      <p class="hint">Drag across the part on the timeline, then press <kbd>W</kbd> or Cut out.</p>
+      <p class="hint">Drag across the part on the timeline, then press <kbd>W</kbd> or Cut out. Or press <kbd>W</kbd> at each end to split there, double-click the part between, and press <kbd>W</kbd> again.</p>
       <div class="row">
-        <button type="button" class="btn" disabled={!sel} onclick={cutSelection} title="Cut out (W or Delete)">
-          <Scissors size={16} strokeWidth={1.5} />Cut out
-        </button>
+        {#if sel}
+          <button type="button" class="btn" onclick={cutOut} title="Cut out (W or Delete)">
+            <Scissors size={16} strokeWidth={1.5} />Cut out
+          </button>
+        {:else}
+          <button type="button" class="btn" disabled={!canSplit} onclick={() => splitAt(media.time)} title="Split at the playhead (W)">
+            <SquareSplitHorizontal size={16} strokeWidth={1.5} />Split
+          </button>
+        {/if}
         <button type="button" class="btn" disabled={!sel} onclick={keepSelection}>Keep only this</button>
       </div>
       {#if sel}<p class="hint num">Selected {fmtTime(sel.end - sel.start, true)}</p>{/if}
@@ -265,6 +277,20 @@
           {/each}
         </div>
         {#if cropping}<p class="hint">Drag the frame or its corners on the video.</p>{/if}
+        <h3 class="sub">Thumbnail</h3>
+        {#if !THUMB_TYPES.includes(ui.file?.ext ?? "")}
+          <p class="hint">MP4, MOV and MKV files can carry a thumbnail. Save As one of those to add it.</p>
+        {/if}
+        {#if media.edit.coverFrame != null}
+          <div class="added">
+            <Image size={16} strokeWidth={1.5} />
+            <button type="button" class="link name num" title="Go to this frame" onclick={() => seek(media.edit.coverFrame ?? 0)}>Frame at {fmtTime(media.edit.coverFrame, true)}</button>
+            <button type="button" class="icon-btn" aria-label="Don’t change the thumbnail" title="Remove" onclick={() => changeMedia((e) => (e.coverFrame = null))}><X size={15} strokeWidth={1.5} /></button>
+          </div>
+        {/if}
+        <button type="button" class="btn" onclick={() => changeMedia((e) => (e.coverFrame = media.time))}>
+          <Image size={16} strokeWidth={1.5} />{media.edit.coverFrame != null ? "Use this frame instead" : "Use this frame as the thumbnail"}
+        </button>
         {#if redraws && pictureChanged()}
           <p class="note">Saving re-encodes the video to apply these picture changes{media.edit.rotate || media.edit.flip ? " (turning alone stays lossless in MP4 and MOV)" : ""}.</p>
         {/if}
@@ -332,7 +358,7 @@
             </select>
           </label>
         {/if}
-        <p class="hint">To save as another format (WAV, FLAC, MP3, M4A, Opus), use Save As.</p>
+        <p class="hint">To save as another format (WAV, FLAC, MP3, M4A, Opus, OGG, AIFF), use Save As, or pick one for every save in Settings → Audio.</p>
       </section>
     {/if}
 
@@ -348,6 +374,9 @@
         {#each subs as s, i (i)}
           <div class="toggle">
             <span>{trackName(s, "Subtitles", i, subs.length)}</span>
+            {#if textSub(s)}
+              <button type="button" class="icon-btn" title="Save as an .srt file, timed to your edit" aria-label="Save {trackName(s, 'Subtitles', i, subs.length)} as a file" onclick={() => saveSubtitles(i)}><Download size={15} strokeWidth={1.5} /></button>
+            {/if}
             <button type="button" class="switch" role="switch" aria-checked={media.edit.keepSubs[i] ?? true} aria-label="Keep {trackName(s, 'Subtitles', i, subs.length)}" onclick={() => toggleTrack("keepSubs", i)}></button>
           </div>
         {/each}

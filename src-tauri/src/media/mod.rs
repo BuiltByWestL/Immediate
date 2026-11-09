@@ -3,6 +3,7 @@
 //! install.rs.
 
 mod convert;
+pub mod hw;
 pub mod export;
 pub mod install;
 pub mod record;

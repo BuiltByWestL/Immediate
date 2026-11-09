@@ -60,6 +60,7 @@
           <div class="sep" role="separator"></div>
           {#if hasSound}<button type="button" role="menuitem" onclick={() => saveMedia("copy", "audio")}><span>Save sound only</span></button>{/if}
           <button type="button" role="menuitem" onclick={() => saveMedia("copy", "gif")}><span>Save as GIF</span></button>
+          <button type="button" role="menuitem" onclick={() => saveMedia("copy", "webp")}><span>Save as animated WebP</span></button>
         {/if}
       </div>
     {/if}

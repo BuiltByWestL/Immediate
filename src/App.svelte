@@ -16,7 +16,7 @@
   const loadMediaEditor = () => import("./modes/media/MediaEditor.svelte");
   import { beginMediaEdit, cancelMediaEdit, saveMedia } from "./modes/media/actions";
   import { mediaKeys } from "./modes/media/keys";
-  import { changeMedia, media, mediaChanged, redoMedia, undoMedia } from "./modes/media/session.svelte";
+  import { cutSelection, media, mediaChanged, redoMedia, undoMedia } from "./modes/media/session.svelte";
   import { prepareToolsInBackground } from "./lib/tools.svelte";
   import { answerUnsavedQueries } from "./lib/updates.svelte";
   import Recorder from "./app/Recorder.svelte";
@@ -136,11 +136,8 @@
       }
       if (typing(e.target)) return;
       if (key === "Escape") cancelMediaEdit();
-      else if ((key === "Delete" || key === "Backspace") && media.selection) {
-        const s = { ...media.selection };
-        changeMedia((ed) => ed.cuts.push(s));
-        media.selection = null;
-      } else if (!mediaKeys.handler?.(e)) return;
+      else if ((key === "Delete" || key === "Backspace") && media.selection) cutSelection();
+      else if (!mediaKeys.handler?.(e)) return;
       e.preventDefault();
       return;
     }
