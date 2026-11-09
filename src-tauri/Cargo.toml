@@ -1,6 +1,6 @@
 [package]
 name = "immediate"
-version = "0.1.1"
+version = "0.2.0"
 description = "Open any media file, make a quick edit, save a file."
 authors = ["BuiltByWestL"]
 license = "MIT"
