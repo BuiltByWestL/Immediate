@@ -27,11 +27,31 @@ fn yes() -> bool {
     true
 }
 
-// Tone bands, where laptop and phone speakers can play them (MediaEditor.svelte uses the same).
-const BASS_HZ: u32 = 200;
-const MID_HZ: u32 = 1000;
-const MID_Q: f64 = 0.7;
-const TREBLE_HZ: u32 = 4000;
+/// Tone filters: the same file the live preview reads (src/modes/media/tone.json), so what
+/// plays while editing and what is saved use one set of frequencies and widths.
+#[derive(Deserialize)]
+pub(crate) struct Tone {
+    pub bass: Band,
+    pub mid: Band,
+    pub treble: Band,
+    pub geq: Bands,
+}
+#[derive(Deserialize)]
+pub(crate) struct Band {
+    pub hz: f64,
+    #[serde(default)]
+    pub q: f64,
+}
+#[derive(Deserialize)]
+pub(crate) struct Bands {
+    pub hz: Vec<f64>,
+    pub q: f64,
+}
+
+pub(crate) fn tone() -> &'static Tone {
+    static TONE: std::sync::OnceLock<Tone> = std::sync::OnceLock::new();
+    TONE.get_or_init(|| serde_json::from_str(include_str!("../../../src/modes/media/tone.json")).expect("tone.json"))
+}
 
 #[derive(Deserialize, Clone, Copy, Debug)]
 pub struct Segment {
@@ -241,9 +261,9 @@ fn fmt_t(t: f64) -> String {
 pub struct Sound {
     /// Volume change in dB (0 = unchanged). Video is still copied when it's the only change.
     pub gain_db: f64,
-    /// Tone in dB: bass (shelf below BASS_HZ), mid (peak at MID_HZ), treble (shelf above TREBLE_HZ).
+    /// Tone in dB: bass (low shelf), mid (peak), treble (high shelf); frequencies in tone.json.
     pub eq: [f64; 3],
-    /// Graphic equalizer in dB, one per GEQ_HZ band (missing = 0).
+    /// Graphic equalizer in dB, one per tone.json `geq` band (missing = 0).
     pub geq: Vec<f64>,
     /// Low cut (high-pass) and high cut (low-pass) in Hz; 0 = off.
     pub low_cut: f64,
@@ -267,10 +287,6 @@ impl Sound {
     }
 }
 
-/// Graphic equalizer bands (Hz), one octave apart; each a peak filter at Q GEQ_Q.
-pub const GEQ_HZ: [u32; 10] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-const GEQ_Q: f64 = 1.41;
-
 pub(crate) fn shaping_chain(s: &Sound) -> Vec<String> {
     let mut chain: Vec<String> = Vec::new();
     if s.gain_db.abs() > 0.01 {
@@ -286,20 +302,22 @@ pub(crate) fn shaping_chain(s: &Sound) -> Vec<String> {
     if s.high_cut > 0.0 {
         chain.push(format!("lowpass=f={:.0}:t=q:w=0.707", s.high_cut));
     }
+    let t = tone();
     let [bass, mid, treble] = s.eq;
     if bass.abs() > 0.05 {
-        // Q 0.707 matches the Web Audio shelves heard while playing (slope 1).
-        chain.push(format!("bass=g={bass:.1}:f={BASS_HZ}:t=q:w=0.707"));
+        // Web Audio's shelves (heard while playing) have slope 1; ffmpeg's shelf matches that
+        // at its Q 0.5 (not 0.707, which overshoots by about 1 dB; see the live-vs-saved test).
+        chain.push(format!("bass=g={bass:.1}:f={}:t=q:w=0.5", t.bass.hz));
     }
     if mid.abs() > 0.05 {
-        chain.push(format!("equalizer=f={MID_HZ}:t=q:w={MID_Q}:g={mid:.1}"));
+        chain.push(format!("equalizer=f={}:t=q:w={}:g={mid:.1}", t.mid.hz, t.mid.q));
     }
     if treble.abs() > 0.05 {
-        chain.push(format!("treble=g={treble:.1}:f={TREBLE_HZ}:t=q:w=0.707"));
+        chain.push(format!("treble=g={treble:.1}:f={}:t=q:w=0.5", t.treble.hz));
     }
-    for (f, g) in GEQ_HZ.iter().zip(s.geq.iter()) {
+    for (f, g) in t.geq.hz.iter().zip(s.geq.iter()) {
         if g.abs() > 0.05 {
-            chain.push(format!("equalizer=f={f}:t=q:w={GEQ_Q}:g={g:.1}"));
+            chain.push(format!("equalizer=f={f}:t=q:w={}:g={g:.1}", t.geq.q));
         }
     }
     if s.compress {
@@ -1370,6 +1388,101 @@ mod tests {
         assert!(a.contains("acompressor") && a.ends_with("print_format=json[m] -map [m] -f null -"), "{a}");
         // Peak mode asks volumedetect instead.
         assert!(measure_args("in.wav", &segs, 0, &sound, true).join(" ").contains("makeup=2,volumedetect[m]"));
+    }
+
+    /// Live preview vs saved file: Web Audio's filters (the spec's formulas, with the settings
+    /// MediaEditor.svelte uses from tone.json) against ffmpeg actually filtering sine tones with
+    /// the saving chain. They must agree within 0.5 dB. Skipped when ffmpeg isn't installed.
+    #[test]
+    fn live_preview_matches_the_saved_sound() {
+        let ffmpeg = std::env::var("IMMEDIATE_TEST_FFMPEG").unwrap_or_else(|_| "ffmpeg".into());
+        if std::process::Command::new(&ffmpeg).arg("-version").output().is_err() {
+            eprintln!("ffmpeg not found: skipping the live-vs-saved sound test");
+            return;
+        }
+        let sound = Sound {
+            eq: [6.0, -4.0, 5.0],
+            geq: vec![0.0, 3.0, 0.0, -2.0, 0.0, 0.0, 4.0, 0.0, -3.0, 0.0],
+            low_cut: 80.0,
+            high_cut: 12000.0,
+            ..Default::default()
+        };
+        let chain = shaping_chain(&sound).join(",");
+        const FS: f64 = 48000.0;
+        let t = tone();
+        for f in [60.0, 120.0, 200.0, 500.0, 1000.0, 2000.0, 4000.0, 8000.0, 11000.0] {
+            // Web Audio: the product of each node's response at f.
+            let mut want = web_audio::highpass(sound.low_cut, f, FS) * web_audio::lowpass(sound.high_cut, f, FS);
+            want *= web_audio::lowshelf(t.bass.hz, sound.eq[0], f, FS);
+            want *= web_audio::peaking(t.mid.hz, t.mid.q, sound.eq[1], f, FS);
+            want *= web_audio::highshelf(t.treble.hz, sound.eq[2], f, FS);
+            for (hz, g) in t.geq.hz.iter().zip(&sound.geq) {
+                want *= web_audio::peaking(*hz, t.geq.q, *g, f, FS);
+            }
+            let want_db = 20.0 * want.log10();
+            // ffmpeg: RMS of the steady part of a filtered sine, minus the unfiltered one.
+            let rms = |filters: &str| -> f64 {
+                let af = format!("{filters}atrim=start=0.5,astats=metadata=1:reset=0,ametadata=print:key=lavfi.astats.Overall.RMS_level");
+                let out = std::process::Command::new(&ffmpeg)
+                    .args(["-hide_banner", "-nostats", "-f", "lavfi", "-i", &format!("sine=f={f}:sample_rate=48000:d=1.5"), "-af", &af, "-f", "null", "-"])
+                    .output()
+                    .unwrap();
+                let text = String::from_utf8_lossy(&out.stderr).into_owned() + &String::from_utf8_lossy(&out.stdout);
+                text.lines().filter_map(|l| l.split("RMS_level=").nth(1)).filter_map(|v| v.trim().parse::<f64>().ok()).last().expect("RMS level")
+            };
+            let got_db = rms(&format!("{chain},")) - rms("");
+            assert!((got_db - want_db).abs() <= 0.5, "{f} Hz: live {want_db:.2} dB, saved {got_db:.2} dB");
+        }
+    }
+
+    /// Web Audio's BiquadFilterNode, as the Web Audio spec defines it (RBJ cookbook; shelves with
+    /// slope 1; high/low pass Q given in dB, -3.01 dB = 0.707). Magnitude at frequency f.
+    mod web_audio {
+        use std::f64::consts::PI;
+
+        fn mag(b: [f64; 3], a: [f64; 3], f: f64, fs: f64) -> f64 {
+            let w = 2.0 * PI * f / fs;
+            let (c1, s1, c2, s2) = (w.cos(), w.sin(), (2.0 * w).cos(), (2.0 * w).sin());
+            let num = ((b[0] + b[1] * c1 + b[2] * c2).powi(2) + (b[1] * s1 + b[2] * s2).powi(2)).sqrt();
+            let den = ((a[0] + a[1] * c1 + a[2] * c2).powi(2) + (a[1] * s1 + a[2] * s2).powi(2)).sqrt();
+            num / den
+        }
+        fn w0(f0: f64, fs: f64) -> (f64, f64) {
+            let w = 2.0 * PI * f0 / fs;
+            (w.cos(), w.sin())
+        }
+        pub fn highpass(f0: f64, f: f64, fs: f64) -> f64 {
+            let (c, s) = w0(f0, fs);
+            let al = s / (2.0 * 10f64.powf(-3.0103 / 20.0));
+            mag([(1.0 + c) / 2.0, -(1.0 + c), (1.0 + c) / 2.0], [1.0 + al, -2.0 * c, 1.0 - al], f, fs)
+        }
+        pub fn lowpass(f0: f64, f: f64, fs: f64) -> f64 {
+            let (c, s) = w0(f0, fs);
+            let al = s / (2.0 * 10f64.powf(-3.0103 / 20.0));
+            mag([(1.0 - c) / 2.0, 1.0 - c, (1.0 - c) / 2.0], [1.0 + al, -2.0 * c, 1.0 - al], f, fs)
+        }
+        pub fn peaking(f0: f64, q: f64, g: f64, f: f64, fs: f64) -> f64 {
+            let (c, s) = w0(f0, fs);
+            let a = 10f64.powf(g / 40.0);
+            let al = s / (2.0 * q);
+            mag([1.0 + al * a, -2.0 * c, 1.0 - al * a], [1.0 + al / a, -2.0 * c, 1.0 - al / a], f, fs)
+        }
+        pub fn lowshelf(f0: f64, g: f64, f: f64, fs: f64) -> f64 {
+            let (c, s) = w0(f0, fs);
+            let a = 10f64.powf(g / 40.0);
+            let al = s / 2.0 * 2f64.sqrt();
+            let k = 2.0 * al * a.sqrt();
+            let b = [a * ((a + 1.0) - (a - 1.0) * c + k), 2.0 * a * ((a - 1.0) - (a + 1.0) * c), a * ((a + 1.0) - (a - 1.0) * c - k)];
+            mag(b, [(a + 1.0) + (a - 1.0) * c + k, -2.0 * ((a - 1.0) + (a + 1.0) * c), (a + 1.0) + (a - 1.0) * c - k], f, fs)
+        }
+        pub fn highshelf(f0: f64, g: f64, f: f64, fs: f64) -> f64 {
+            let (c, s) = w0(f0, fs);
+            let a = 10f64.powf(g / 40.0);
+            let al = s / 2.0 * 2f64.sqrt();
+            let k = 2.0 * al * a.sqrt();
+            let b = [a * ((a + 1.0) + (a - 1.0) * c + k), -2.0 * a * ((a - 1.0) + (a + 1.0) * c), a * ((a + 1.0) + (a - 1.0) * c - k)];
+            mag(b, [(a + 1.0) - (a - 1.0) * c + k, 2.0 * ((a - 1.0) - (a + 1.0) * c), (a + 1.0) - (a - 1.0) * c - k], f, fs)
+        }
     }
 
     #[test]

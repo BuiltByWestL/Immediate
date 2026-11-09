@@ -12,6 +12,7 @@
   import { mediaKeys } from "./keys";
   import { commitMedia as commit, cutSelection, fmtTime, GEQ_BANDS, keptSegments, media, nextKept, silencedAt, soundOf, splitAt, totalLength } from "./session.svelte";
   import CropFrame from "./CropFrame.svelte";
+  import tone from "./tone.json";
   import Timeline from "./Timeline.svelte";
 
   let { file }: { file: OpenedFile } = $props();
@@ -245,11 +246,13 @@
         b.Q.value = 0.7;
         return b;
       };
-      // Same bands as saving (export.rs): where laptop and phone speakers can play them.
-      const eq = [mk("lowshelf", 200), mk("peaking", 1000), mk("highshelf", 4000)];
+      // The same filters as saving (export.rs), from one file: tone.json. Shelves ignore Q in
+      // Web Audio (slope 1, like saving's Q 0.707).
+      const eq = [mk("lowshelf", tone.bass.hz), mk("peaking", tone.mid.hz), mk("highshelf", tone.treble.hz)];
+      eq[1].Q.value = tone.mid.q;
       const geq = GEQ_BANDS.map((f) => {
         const b = mk("peaking", f);
-        b.Q.value = 1.41;
+        b.Q.value = tone.geq.q;
         return b;
       });
       // Low and high cut: Butterworth, like saving. Web Audio gives these filters' Q in dB

@@ -18,6 +18,13 @@ use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 type Writer = hound::WavWriter<std::io::BufWriter<std::fs::File>>;
 
+/// The recording file: 16-bit PCM WAV. `flush` (every second while recording) rewrites the
+/// header, so the file is valid up to that point even if Immediate is killed.
+fn new_writer(path: &std::path::Path, rate: u32, channels: u16) -> Result<Writer, String> {
+    let spec = hound::WavSpec { channels, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+    hound::WavWriter::create(path, spec).map_err(|e| e.to_string())
+}
+
 struct Active {
     stop: mpsc::Sender<()>,
     paused: Arc<AtomicBool>,
@@ -124,8 +131,7 @@ pub async fn rec_start<R: Runtime>(app: AppHandle<R>, device: Option<String>, na
             };
             let channels = supported.channels().min(2);
             let rate = supported.sample_rate();
-            let spec = hound::WavSpec { channels, sample_rate: rate, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
-            let writer: Arc<Mutex<Option<Writer>>> = Arc::new(Mutex::new(Some(hound::WavWriter::create(&p, spec).map_err(|e| e.to_string())?)));
+            let writer: Arc<Mutex<Option<Writer>>> = Arc::new(Mutex::new(Some(new_writer(&p, rate, channels)?)));
             let peak = Arc::new(AtomicU32::new(0));
             let frames = Arc::new(std::sync::atomic::AtomicU64::new(0));
             // When the sound last arrived (ms since start): loopback sends nothing during silence.
@@ -267,4 +273,34 @@ pub async fn rec_stop<R: Runtime>(app: AppHandle<R>, keep: bool) -> Result<Strin
     result?;
     let _ = app.asset_protocol_scope().allow_file(&path);
     Ok(path.to_string_lossy().into_owned())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A recording that is never finished (Immediate killed mid-recording) is still a valid
+    /// WAV holding everything up to the last once-a-second flush.
+    #[test]
+    fn a_killed_recording_is_still_a_valid_wav() {
+        let path = std::env::temp_dir().join(format!("immediate-rec-{}.wav", std::process::id()));
+        let mut w = new_writer(&path, 48000, 2).unwrap();
+        for i in 0..48000 * 2 {
+            w.write_sample(((i % 200) as i16 - 100) * 50).unwrap();
+        }
+        w.flush().unwrap();
+        // Half a second more that never reached a flush, then "killed": no finalize, no Drop.
+        for _ in 0..24000 * 2 {
+            w.write_sample(1000i16).unwrap();
+        }
+        std::mem::forget(w);
+        let r = hound::WavReader::open(&path).expect("valid WAV after a crash");
+        assert_eq!(r.spec().sample_rate, 48000);
+        assert_eq!(r.spec().channels, 2);
+        // At least the flushed second, and every sample readable.
+        assert!(r.duration() >= 48000, "{}", r.duration());
+        let n = r.into_samples::<i16>().filter(|s| s.is_ok()).count();
+        assert!(n >= 48000 * 2);
+        let _ = std::fs::remove_file(path);
+    }
 }

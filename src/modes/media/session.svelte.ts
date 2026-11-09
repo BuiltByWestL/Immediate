@@ -2,6 +2,7 @@
 // source time. Nothing touches the file until Save.
 
 import { ui } from "../../lib/app.svelte";
+import tone from "./tone.json";
 
 export interface Range {
   start: number;
@@ -68,8 +69,8 @@ export interface Range2D {
   h: number;
 }
 
-/** Graphic equalizer bands (Hz); export.rs uses the same (GEQ_HZ), each a peak at Q 1.41. */
-export const GEQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+/** Graphic equalizer bands (Hz), from tone.json (saving reads the same file). */
+export const GEQ_BANDS: number[] = tone.geq.hz;
 
 export function blankEdit(duration: number): MediaEdit {
   return {
