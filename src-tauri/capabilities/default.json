@@ -12,6 +12,8 @@
     "core:window:allow-destroy",
     "core:window:allow-set-fullscreen",
     "core:window:allow-is-fullscreen",
+    "core:window:allow-set-focus",
+    "core:window:allow-unminimize",
     "opener:default",
     "dialog:allow-open",
     "dialog:allow-save"

@@ -18,6 +18,7 @@
   import { mediaKeys } from "./modes/media/keys";
   import { changeMedia, media, mediaChanged, redoMedia, undoMedia } from "./modes/media/session.svelte";
   import { prepareToolsInBackground } from "./lib/tools.svelte";
+  import { answerUnsavedQueries } from "./lib/updates.svelte";
   import Recorder from "./app/Recorder.svelte";
   import { closeRecorder, openRecorder, rec, startRecording, stopRecording, togglePause } from "./lib/record.svelte";
   import { beginEdit, cancelEdit, copyEdited, save } from "./modes/image/actions";
@@ -72,8 +73,7 @@
         win.destroy();
         return;
       }
-      const { docChanged } = await import("./modes/doc/doc.svelte");
-      if (!hasChanges() && !mediaChanged() && !docChanged()) return;
+      if (!(await unsavedEdits())) return;
       e.preventDefault();
       const ok = await ask({
         title: "Close without saving?",
@@ -84,11 +84,19 @@
       });
       if (ok) win.destroy();
     });
+    // An update restarts every window; each says first whether it would lose anything.
+    const unanswer = answerUnsavedQueries(async () => (rec.open && rec.phase !== "ready") || (await unsavedEdits()));
     return () => {
       unlisten.then((f) => f());
       unclose.then((f) => f());
+      unanswer();
     };
   });
+
+  async function unsavedEdits() {
+    const { docChanged } = await import("./modes/doc/doc.svelte");
+    return hasChanges() || mediaChanged() || docChanged();
+  }
 
   function typing(t: EventTarget | null) {
     return t instanceof HTMLElement && (t.isContentEditable || ["INPUT", "SELECT", "TEXTAREA"].includes(t.tagName));

@@ -6,7 +6,7 @@
   import { ACCENTS, BUILTIN, GROUPS, customThemes, findTheme, resolveTheme, setCustomThemes, withAccent, type Theme } from "../../design/theme";
   import { inTauri, toast, ui, updateSettings } from "../../lib/app.svelte";
   import type { Settings } from "../../lib/types";
-  import { checkForUpdates, updates } from "../../lib/updates.svelte";
+  import { checkForUpdates, installUpdate, updates } from "../../lib/updates.svelte";
   import { checkTools, installTools, tools } from "../../lib/tools.svelte";
   import Sheet from "../Sheet.svelte";
   import ShortcutList from "../ShortcutList.svelte";
@@ -167,8 +167,17 @@
                 You have Immediate <span class="num">{version}</span>.
               {/if}
             </span>
-            <button type="button" class="btn" disabled={!inTauri || updates.phase === "checking"} onclick={() => checkForUpdates(true)}>Check now</button>
+            {#if updates.available && updates.phase !== "checking"}
+              <button type="button" class="btn primary" disabled={updates.phase === "installing"} onclick={installUpdate}>
+                {updates.phase === "installing" ? "Installing…" : "Install & restart"}
+              </button>
+            {:else}
+              <button type="button" class="btn" disabled={!inTauri || updates.phase === "checking"} onclick={() => checkForUpdates(true)}>Check now</button>
+            {/if}
           </div>
+          {#if updates.phase === "error"}
+            <div class="row"><span class="dim">Couldn’t install the update: {updates.error}</span></div>
+          {/if}
         </section>
       {:else if ui.settingsSection === "appearance"}
         <section>
