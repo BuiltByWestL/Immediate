@@ -39,7 +39,7 @@ jobs:
           - os: macos-latest
             args: --target x86_64-apple-darwin --bundles app,dmg
           - os: ubuntu-22.04
-            args: --bundles deb,appimage
+            args: --bundles deb,rpm,appimage
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -97,6 +97,7 @@ jobs:
             src-tauri/target/release/bundle/nsis/*-setup.exe
             src-tauri/target/*/release/bundle/dmg/*.dmg
             src-tauri/target/release/bundle/deb/*.deb
+            src-tauri/target/release/bundle/rpm/*.rpm
             src-tauri/target/release/bundle/appimage/*.AppImage
 
   build:
@@ -112,7 +113,7 @@ jobs:
           - os: macos-latest
             args: --target x86_64-apple-darwin --bundles app,dmg
           - os: ubuntu-22.04
-            args: --bundles deb,appimage
+            args: --bundles deb,rpm,appimage
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7

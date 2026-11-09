@@ -1,5 +1,6 @@
 <script lang="ts">
   // Markdown: a formatted reading view; Edit shows the text beside it, updating live.
+  import { convertFileSrc, invoke } from "@tauri-apps/api/core";
   import { openUrl } from "@tauri-apps/plugin-opener";
   import DOMPurify from "dompurify";
   import { marked } from "marked";
@@ -12,6 +13,30 @@
 
   // Rendered HTML is sanitized: a document can show content, never run code.
   const html = $derived(DOMPurify.sanitize(marked.parse(doc.text, { async: false, gfm: true }) as string));
+
+  // Pictures from disk (relative to the document): Rust checks each and makes it readable.
+  let article = $state<HTMLElement | null>(null);
+  const resolved = new Map<string, string | null>();
+  $effect(() => {
+    void html;
+    const el = article;
+    if (!el) return;
+    const imgs = [...el.querySelectorAll("img")].filter((i) => !/^(https?:|data:|blob:)/i.test(i.getAttribute("src") ?? ""));
+    const apply = () => {
+      for (const img of imgs) {
+        const p = resolved.get(img.getAttribute("src") ?? "");
+        if (p) img.src = convertFileSrc(p);
+      }
+    };
+    const missing = [...new Set(imgs.map((i) => i.getAttribute("src") ?? ""))].filter((s) => s && !resolved.has(s));
+    if (!missing.length) return apply();
+    invoke<(string | null)[]>("doc_images", { doc: file.path, srcs: missing })
+      .then((paths) => {
+        missing.forEach((s, i) => resolved.set(s, paths[i]));
+        apply();
+      })
+      .catch(() => {});
+  });
 
   function onclick(e: MouseEvent) {
     const a = (e.target as HTMLElement).closest("a");
@@ -44,7 +69,7 @@
       <textarea bind:value={doc.text} spellcheck="true" aria-label="{file.name} text"></textarea>
     {/if}
     <!-- svelte-ignore a11y_click_events_have_key_events, a11y_no_noninteractive_element_interactions -->
-    <article class="prose" {onclick}>{@html html}</article>
+    <article class="prose" bind:this={article} {onclick}>{@html html}</article>
   </div>
 </div>
 

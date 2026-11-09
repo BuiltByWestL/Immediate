@@ -127,6 +127,7 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
     const saved = await invoke<string>("media_export", {
       req: {
         source: file.path,
+        sourceExt: file.ext,
         segments,
         mode: media.mode,
         mute: media.edit.mute,

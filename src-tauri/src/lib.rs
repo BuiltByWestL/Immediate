@@ -4,6 +4,8 @@ mod formats;
 mod image;
 mod media;
 mod place;
+mod ready;
+mod recent;
 mod settings;
 mod shellmenu;
 mod text;
@@ -123,6 +125,7 @@ pub fn run() {
             files::file_details,
             files::clipboard_paste,
             files::reveal,
+            files::doc_images,
             image::image_info,
             image::decode_image,
             image::copy_image_file,
@@ -156,6 +159,9 @@ pub fn run() {
             media::export::media_grab_frame,
             media::export::media_save_subtitles,
             media::hw::media_hw_encoders,
+            recent::recent_add,
+            recent::recent_list,
+            recent::recent_clear,
             wm::inbox_take,
             wm::open_in_new_window,
             update::update_check,
@@ -166,12 +172,23 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("error while starting Immediate");
 
-    app.run(|_app, _event| {
+    app.run(|app, event| match event {
+        // The last window closed (not a Quit or a restart, which carry an exit code): with
+        // "Keep Immediate ready" on, stay running with a hidden window for the next file.
+        tauri::RunEvent::ExitRequested { api, code: None, .. } => {
+            if ready::on_last_window_closed(app) {
+                api.prevent_exit();
+            }
+        }
         // macOS delivers "Open with" / double-clicked files as an event instead of arguments.
         #[cfg(target_os = "macos")]
-        if let tauri::RunEvent::Opened { urls } = _event {
+        tauri::RunEvent::Opened { urls } => {
             let files = urls.into_iter().filter_map(|u| u.to_file_path().ok());
-            wm::deliver(_app, wm::path_list(files));
+            wm::deliver(app, wm::path_list(files));
         }
+        // Clicking the Dock icon with no window open shows one.
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen { has_visible_windows: false, .. } => wm::deliver(app, vec![]),
+        _ => {}
     });
 }

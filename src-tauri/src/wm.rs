@@ -43,6 +43,14 @@ struct Inner {
     has_file: HashMap<String, bool>,
     inbox: HashMap<String, Vec<Batch>>,
     last_open: Option<(Instant, String)>,
+    /// A hidden, loaded window kept for the next file ("Keep Immediate ready", ready.rs).
+    spare: Option<String>,
+}
+
+/// A file Immediate can open, by its extension or else its contents.
+fn openable(path: &str) -> bool {
+    let p = Path::new(path);
+    formats::lookup(p).is_some() || formats::sniff(p).is_some()
 }
 
 pub fn set_has_file<R: Runtime>(app: &AppHandle<R>, label: &str) {
@@ -70,6 +78,28 @@ pub fn files_from_args<I: IntoIterator<Item = String>>(args: I, cwd: &Path) -> V
 
 /// Opens a new window, optionally with files. Returns its label.
 pub fn open_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) -> tauri::Result<String> {
+    build_window(app, files, true)
+}
+
+/// Prepares a hidden window for the next file (the last visible one just closed).
+pub fn open_spare<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<()> {
+    let label = build_window(app, vec![], false)?;
+    if let Ok(mut i) = app.state::<Wm>().inner.lock() {
+        i.spare = Some(label);
+        // A spare isn't a window that was "just opened" for gathering files.
+        i.last_open = None;
+    }
+    Ok(())
+}
+
+/// Only the hidden spare window is left (no window the user can see).
+pub fn only_spare_left<R: Runtime>(app: &AppHandle<R>) -> bool {
+    let spare = app.state::<Wm>().inner.lock().ok().and_then(|i| i.spare.clone());
+    let windows = app.windows();
+    spare.is_some() && windows.keys().all(|l| Some(l) == spare.as_ref())
+}
+
+fn build_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>, visible: bool) -> tauri::Result<String> {
     let wm = app.state::<Wm>();
     let label = format!("w{}", wm.next.fetch_add(1, Ordering::Relaxed) + 1);
     if let Ok(mut i) = wm.inner.lock() {
@@ -87,6 +117,11 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) -> tauri:
         .inner_size(1100.0, 720.0)
         .min_inner_size(560.0, 400.0)
         .visible(false);
+    // macOS: the toolbar is the title bar (the window buttons sit in its left end).
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
+    }
     let cascade = match anchor.as_ref().and_then(|w| Some((w.outer_position().ok()?, w.scale_factor().ok()?))) {
         Some((p, scale)) => {
             let p = p.to_logical::<f64>(scale);
@@ -103,9 +138,11 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) -> tauri:
     crate::place::restore(&window, cascade);
     // Paint the frame in the theme color before it is shown, so it never flashes white.
     let theme = crate::chrome::apply(app, &window);
-    window.show()?;
-    let _ = window.set_focus();
-    crate::mark("windowShown");
+    if visible {
+        window.show()?;
+        let _ = window.set_focus();
+        crate::mark("windowShown");
+    }
 
     // Attach the webview once the event loop has had a chance to paint the window. On Windows,
     // WebView2 needs ~250 ms to start its browser process; the window is on screen meanwhile.
@@ -131,7 +168,7 @@ pub fn open_window<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) -> tauri:
 /// Routes files from outside (second launch, macOS open event) to a window: a window opened
 /// moments ago gathers them, an empty window takes them, otherwise a new window opens.
 pub fn deliver<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) {
-    let files: Vec<String> = files.into_iter().filter(|f| formats::lookup(Path::new(f)).is_some()).collect();
+    let files: Vec<String> = files.into_iter().filter(|f| openable(f)).collect();
     let target = {
         let wm = app.state::<Wm>();
         let Ok(mut i) = wm.inner.lock() else { return };
@@ -162,6 +199,16 @@ pub fn deliver<R: Runtime>(app: &AppHandle<R>, files: Vec<String>) {
         Some((label, _)) => {
             let _ = app.emit_to(&label, "inbox", ());
             if let Some(w) = app.get_window(&label) {
+                // The hidden spare: show it where the last window was.
+                if !w.is_visible().unwrap_or(true) {
+                    if let Ok(mut i) = app.state::<Wm>().inner.lock() {
+                        i.spare = None;
+                        i.last_open = Some((Instant::now(), label.clone()));
+                    }
+                    crate::place::restore(&w, false);
+                    let _ = w.show();
+                    crate::ready::hide_tray(app);
+                }
                 let _ = w.unminimize();
                 let _ = w.set_focus();
             }

@@ -1,12 +1,20 @@
 <script lang="ts">
   import { onMount } from "svelte";
-  import { inTauri, ui } from "../lib/app.svelte";
+  import { inTauri, ui, updateSettings } from "../lib/app.svelte";
   import { checkForUpdates, installUpdate, updates } from "../lib/updates.svelte";
+
+  const DAY = 24 * 60 * 60 * 1000;
 
   onMount(() => {
     if (!inTauri || !ui.settings.checkUpdates) return;
+    // At most once a day once Immediate is known to be up to date; while an update is waiting
+    // (or the last check failed), every launch looks again so the offer stays in view.
+    if (Date.now() - ui.settings.lastUpdateCheck < DAY) return;
     // Check quietly a moment after startup so it never competes with opening a file.
-    const t = setTimeout(() => checkForUpdates(false), 3000);
+    const t = setTimeout(async () => {
+      await checkForUpdates(false);
+      if (updates.lastResult === "current") updateSettings({ lastUpdateCheck: Date.now() });
+    }, 3000);
     return () => clearTimeout(t);
   });
 </script>

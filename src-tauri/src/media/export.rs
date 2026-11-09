@@ -113,6 +113,9 @@ pub struct ExportRequest {
     sample_rate: Option<u32>,
     #[serde(default)]
     bit_depth: Option<u32>,
+    /// The source's type when its name doesn't say (found from its contents).
+    #[serde(default)]
+    source_ext: Option<String>,
     /// "copy" | "replace" | "path"
     target: String,
     dest: Option<String>,
@@ -627,7 +630,10 @@ struct ExtraSubs {
 
 fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) -> Result<PathBuf, String> {
     let source = PathBuf::from(&req.source);
-    let src_ext = ext_of(&source);
+    let src_ext = match ext_of(&source) {
+        e if crate::formats::lookup(&source).is_some() => e,
+        e => req.source_ext.clone().filter(|x| !x.is_empty()).unwrap_or(e),
+    };
     let segs: Vec<Segment> = req.segments.iter().copied().filter(|s| s.end - s.start > 0.01).collect();
     if segs.is_empty() {
         return Err("Nothing is left to save: every part was cut out.".into());

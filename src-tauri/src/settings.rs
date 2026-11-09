@@ -156,6 +156,7 @@ pub fn settings_set<R: Runtime>(
     let s = settings.sanitized();
     state.set(s.clone())?;
     crate::chrome::apply_all(&app);
+    crate::ready::settings_changed(&app);
     let _ = app.emit("settings", &s);
     Ok(s)
 }

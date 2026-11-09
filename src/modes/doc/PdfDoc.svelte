@@ -38,7 +38,17 @@
     (async () => {
       try {
         const data = await (await fetch(convertFileSrc(file.path))).arrayBuffer();
-        task = pdfjs.getDocument({ data, useSystemFonts: true });
+        // Fonts, character maps and decoders pdf.js fetches when a PDF needs them (vite.config.ts).
+        const assets = (dir: string) => new URL(`/pdfjs/${dir}/`, location.href).href;
+        task = pdfjs.getDocument({
+          data,
+          useSystemFonts: true,
+          cMapUrl: assets("cmaps"),
+          cMapPacked: true,
+          standardFontDataUrl: assets("standard_fonts"),
+          wasmUrl: assets("wasm"),
+          iccUrl: assets("iccs"),
+        });
         const doc = await task.promise;
         if (destroyed) return void task.destroy();
         const s: { w: number; h: number }[] = [];

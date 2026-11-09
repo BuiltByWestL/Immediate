@@ -18,7 +18,8 @@
   const zoomText = $derived(viewer.zoom == null ? "" : `${Math.round(viewer.zoom * 100)}%`);
 </script>
 
-<header class="toolbar">
+<!-- On macOS the toolbar is also the title bar: drag it to move the window. -->
+<header class="toolbar" data-tauri-drag-region>
   {#if editor.active}
     {#await loadEditBar() then m}
       <m.default />
@@ -85,6 +86,8 @@
     align-items: center;
     height: var(--toolbar-h);
     padding: 0 var(--s2);
+    -webkit-user-select: none;
+    user-select: none;
     background: var(--bg);
     border-bottom: 1px solid var(--line);
     flex: none;
@@ -118,5 +121,9 @@
   .zoom:hover {
     background: var(--hover);
     color: var(--text);
+  }
+  /* macOS: room for the window buttons (close, minimize, zoom) at the left. */
+  :global(html[data-platform="macos"]) .toolbar {
+    padding-left: 78px;
   }
 </style>

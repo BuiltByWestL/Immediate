@@ -156,6 +156,19 @@
           </div>
         </section>
 
+        <section>
+          <h3>Starting up</h3>
+          <div class="row">
+            <span>Keep Immediate ready in the background</span>
+            <button type="button" class="switch" role="switch" aria-checked={s.keepReady} aria-label="Keep Immediate ready in the background" onclick={() => set({ keepReady: !s.keepReady })}></button>
+          </div>
+          <p class="note">
+            {s.keepReady
+              ? `After you close the last window, Immediate stays ready, so the next file opens instantly. Its icon in the ${window.__IMMEDIATE__?.platform === "macos" ? "menu bar" : "notification area"} has Quit.`
+              : "Files open in well under a second either way; this makes it instant, using a little memory while no window is open."}
+          </p>
+        </section>
+
         {#if menu?.available}
           <section>
             <h3>Right-click menu</h3>

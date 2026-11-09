@@ -42,14 +42,23 @@ pub fn open_path<R: Runtime>(app: AppHandle<R>, window: Window<R>, path: String)
     if !meta.is_file() {
         return Err(format!("“{}” is a folder, not a file.", display_name(&path)));
     }
-    let ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
-    let format = formats::lookup(&path).ok_or_else(|| {
-        if ext.is_empty() {
-            format!("Immediate can’t tell what kind of file “{}” is.", display_name(&path))
-        } else {
-            format!("Immediate can’t open .{ext} files.")
+    let mut ext = path.extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    // A missing or unknown extension: go by what the file starts with (a photo saved as "image",
+    // a video called "clip.download"…). `ext` then names the format found.
+    let format = match formats::lookup(&path) {
+        Some(f) => f,
+        None => {
+            let (found, f) = formats::sniff(&path).ok_or_else(|| {
+                if ext.is_empty() {
+                    format!("Immediate can’t tell what kind of file “{}” is.", display_name(&path))
+                } else {
+                    format!("Immediate can’t open .{ext} files.")
+                }
+            })?;
+            ext = found.to_owned();
+            f
         }
-    })?;
+    };
     app.asset_protocol_scope().allow_file(&path).map_err(|e| e.to_string())?;
     crate::wm::set_has_file(&app, window.label());
     Ok(OpenedFile {
@@ -67,6 +76,56 @@ pub fn open_path<R: Runtime>(app: AppHandle<R>, window: Window<R>, path: String)
 
 fn display_name(path: &Path) -> String {
     path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+}
+
+/// Pictures a Markdown file shows from disk (`![](photo.png)`, relative to the document, or an
+/// absolute path / file:// URL). Each that exists and is a picture the webview can show is made
+/// readable and returned as an absolute path; others are None.
+#[tauri::command]
+pub fn doc_images<R: Runtime>(app: AppHandle<R>, doc: String, srcs: Vec<String>) -> Vec<Option<String>> {
+    let base = Path::new(&doc).parent().map(Path::to_path_buf).unwrap_or_default();
+    srcs.iter()
+        .map(|src| {
+            let p = local_image(&base, src)?;
+            app.asset_protocol_scope().allow_file(&p).ok()?;
+            Some(p.to_string_lossy().into_owned())
+        })
+        .collect()
+}
+
+fn local_image(base: &Path, src: &str) -> Option<PathBuf> {
+    const SHOWN: [&str; 9] = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "svg", "avif", "ico"];
+    let s = src.trim();
+    if s.contains("://") && !s.starts_with("file:") {
+        return None;
+    }
+    let s = s.trim_start_matches("file://");
+    // file:///C:/x on Windows; file:///home/x elsewhere.
+    let s = if cfg!(windows) { s.trim_start_matches('/') } else { s };
+    let s = percent_decode(s.split(['?', '#']).next()?);
+    let p = if Path::new(&s).is_absolute() { PathBuf::from(&s) } else { base.join(&s) };
+    let p = std::path::absolute(p).ok()?;
+    let ext = p.extension()?.to_string_lossy().to_lowercase();
+    (SHOWN.contains(&ext.as_str()) && p.is_file()).then_some(p)
+}
+
+fn percent_decode(s: &str) -> String {
+    let b = s.as_bytes();
+    let hex = |c: u8| (c as char).to_digit(16).map(|d| d as u8);
+    let mut out = Vec::with_capacity(b.len());
+    let mut i = 0;
+    while i < b.len() {
+        if b[i] == b'%' && i + 2 < b.len() {
+            if let (Some(h), Some(l)) = (hex(b[i + 1]), hex(b[i + 2])) {
+                out.push(h * 16 + l);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(b[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 /// Shows the file selected in Explorer / Finder / the file manager.
@@ -285,6 +344,22 @@ pub fn unique_path(dir: &Path, stem: &str, ext: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn markdown_pictures_from_disk() {
+        let dir = std::env::temp_dir().join(format!("immediate-md-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("img")).unwrap();
+        std::fs::write(dir.join("img").join("my photo.png"), b"x").unwrap();
+        std::fs::write(dir.join("notes.txt"), b"x").unwrap();
+        let found = local_image(&dir, "img/my%20photo.png").unwrap();
+        assert!(found.ends_with("my photo.png"));
+        assert!(local_image(&dir, "img/missing.png").is_none());
+        assert!(local_image(&dir, "notes.txt").is_none(), "only pictures");
+        assert!(local_image(&dir, "https://example.com/a.png").is_none());
+        assert_eq!(percent_decode("a%2"), "a%2");
+        assert_eq!(percent_decode("%C3%A9t%C3%A9"), "été");
+        std::fs::remove_dir_all(dir).unwrap();
+    }
 
     #[test]
     fn natural_order() {

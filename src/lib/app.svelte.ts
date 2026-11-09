@@ -143,6 +143,11 @@ async function show(path: string): Promise<boolean> {
 }
 
 /** Opens files: one file browses its folder; several become a set to browse. */
+/** Adds a file the user opened to the start screen's recent list. */
+function remember(path: string) {
+  invoke("recent_add", { path }).catch(() => {});
+}
+
 export async function openPaths(paths: string[], append = false) {
   if (!paths.length) return;
   if (!append && !(await canLeave())) return;
@@ -157,11 +162,12 @@ export async function openPaths(paths: string[], append = false) {
     ui.list = paths;
     ui.isSet = true;
     ui.index = 0;
-    await show(paths[0]);
+    if (await show(paths[0])) remember(paths[0]);
     return;
   }
   if (!(await show(paths[0]))) return;
   const opened = ui.file!.path;
+  remember(opened);
   ui.isSet = false;
   ui.list = [opened];
   ui.index = 0;
