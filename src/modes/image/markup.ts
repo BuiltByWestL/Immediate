@@ -4,10 +4,10 @@
 
 export type Pt = [number, number];
 
-export type ToolId = "pen" | "highlighter" | "arrow" | "text" | "blur" | "line" | "rect" | "ellipse" | "number" | "eraser";
+export type ToolId = "pen" | "pencil" | "highlighter" | "arrow" | "text" | "blur" | "line" | "rect" | "ellipse" | "number" | "eraser" | "picker";
 
 export interface Shape {
-  kind: Exclude<ToolId, "eraser">;
+  kind: Exclude<ToolId, "eraser" | "picker">;
   /** pen/highlighter: the stroke; line/arrow: [a, b]; rect/ellipse/blur: 4 corners; text/number: [at]. */
   pts: Pt[];
   color: string;
@@ -52,7 +52,13 @@ export function paintMarkup(
     ctx.lineWidth = w;
     switch (s.kind) {
       case "pen":
+      case "pencil":
       case "highlighter": {
+        if (s.kind === "pencil") {
+          // Thin and a little see-through, like graphite.
+          ctx.lineWidth = Math.max(0.5, w * 0.45);
+          ctx.globalAlpha = 0.85;
+        }
         if (s.kind === "highlighter") {
           ctx.globalAlpha = 0.4;
           ctx.globalCompositeOperation = "multiply";
@@ -178,6 +184,49 @@ function pixelate(ctx: CanvasRenderingContext2D | OffscreenCanvasRenderingContex
   ctx.imageSmoothingEnabled = false;
   ctx.drawImage(tmp, 0, 0, tw, th, x0, y0, w, h);
   ctx.restore();
+}
+
+/**
+ * Hold-to-snap: what a freehand stroke (screen points) looks like, if it's clearly a line, a box
+ * or an ellipse. Returns the shape's kind and its key points (line: [a, b]; box/ellipse: the
+ * bounding box [min, max]), or null to keep it freehand.
+ */
+export function recognize(pts: [number, number][]): { kind: "line" | "rect" | "ellipse"; a: [number, number]; b: [number, number] } | null {
+  if (pts.length < 4) return null;
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const min: [number, number] = [Math.min(...xs), Math.min(...ys)];
+  const max: [number, number] = [Math.max(...xs), Math.max(...ys)];
+  const diag = Math.hypot(max[0] - min[0], max[1] - min[1]);
+  if (diag < 20) return null;
+  const first = pts[0];
+  const last = pts[pts.length - 1];
+  const span = Math.hypot(last[0] - first[0], last[1] - first[1]);
+  // A line: every point close to the chord from first to last.
+  if (span > diag * 0.8) {
+    const dx = last[0] - first[0];
+    const dy = last[1] - first[1];
+    const off = Math.max(...pts.map((p) => Math.abs((p[0] - first[0]) * dy - (p[1] - first[1]) * dx) / span));
+    if (off < span * 0.06) return { kind: "line", a: first, b: last };
+  }
+  // A closed shape: the end comes back near the start.
+  if (span > diag * 0.25) return null;
+  const cx = (min[0] + max[0]) / 2;
+  const cy = (min[1] + max[1]) / 2;
+  const rx = Math.max(1, (max[0] - min[0]) / 2);
+  const ry = Math.max(1, (max[1] - min[1]) / 2);
+  let ellipseErr = 0;
+  let boxErr = 0;
+  for (const [x, y] of pts) {
+    const nx = (x - cx) / rx;
+    const ny = (y - cy) / ry;
+    ellipseErr += Math.abs(Math.hypot(nx, ny) - 1);
+    boxErr += Math.abs(Math.max(Math.abs(nx), Math.abs(ny)) - 1);
+  }
+  ellipseErr /= pts.length;
+  boxErr /= pts.length;
+  if (Math.min(ellipseErr, boxErr) > 0.2) return null;
+  return { kind: boxErr < ellipseErr ? "rect" : "ellipse", a: min, b: max };
 }
 
 /** The topmost shape near a point (source pixels), for the eraser. */

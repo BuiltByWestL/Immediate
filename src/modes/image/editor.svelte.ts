@@ -3,7 +3,7 @@
 import { clone, isNeutral, neutralEdits, type Edits } from "./edits";
 import type { ToolId } from "./markup";
 import type { Pipeline } from "./pipeline";
-import type { ImageInfo } from "./save";
+import { defaultOutput, type ImageInfo } from "./save";
 
 /** The live GPU pipeline and what Rust said about the photo (not reactive). */
 export const session = {
@@ -11,7 +11,7 @@ export const session = {
   info: null as ImageInfo | null,
 };
 
-export type Tab = "adjust" | "filters" | "crop" | "markup";
+export type Tab = "adjust" | "filters" | "crop" | "markup" | "save";
 
 export const editor = $state({
   active: false,
@@ -25,8 +25,12 @@ export const editor = $state({
   saving: false,
   /** Markup tool settings. */
   tool: "pen" as ToolId,
+  /** The tool to go back to after picking a color. */
+  prevTool: "pen" as ToolId,
   color: "#ff3b30",
   size: "m" as "s" | "m" | "l",
+  /** Advanced → Save: format, quality, size, details. */
+  output: defaultOutput(),
   /** The photo is loaded on the GPU and ready to edit. */
   ready: false,
   error: "",
@@ -42,6 +46,7 @@ export function startEditing() {
   editor.future = [];
   editor.tab = "adjust";
   editor.comparing = false;
+  editor.output = defaultOutput();
   editor.active = true;
 }
 

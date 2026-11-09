@@ -2,7 +2,7 @@
   // Draws the markup over the live photo and, on the Markup tab, takes pen/mouse input.
   import { change, editor } from "./editor.svelte";
   import { mapper, type Size } from "./geometry";
-  import { hitTest, paintMarkup, SIZES, type Pt, type Shape } from "./markup";
+  import { hitTest, paintMarkup, recognize, SIZES, type Pt, type Shape } from "./markup";
 
   let {
     scale,
@@ -81,6 +81,35 @@
 
   let start: [number, number] | null = null;
 
+  // Hold-to-snap: pause at the end of a freehand stroke and a rough line, box or circle becomes
+  // a clean one (it stays snapped until the button is let go).
+  let stroke: [number, number][] = [];
+  let holdTimer: ReturnType<typeof setTimeout> | null = null;
+  let snapped = false;
+  const freehand = (k: Shape["kind"]) => k === "pen" || k === "pencil";
+  function armSnap() {
+    if (holdTimer) clearTimeout(holdTimer);
+    holdTimer = setTimeout(snap, 550);
+  }
+  function snap() {
+    holdTimer = null;
+    if (!draft || !freehand(draft.kind) || snapped) return;
+    const found = recognize(stroke);
+    if (!found) return;
+    snapped = true;
+    draft = found.kind === "line" ? base("line", [toSource(...found.a), toSource(...found.b)]) : base(found.kind, box(found.a, found.b));
+  }
+
+  /** The photo's color under a point (stage px), as #rrggbb. */
+  function colorAt(p: [number, number]): string | null {
+    const d = dpr();
+    const c = new OffscreenCanvas(1, 1).getContext("2d");
+    if (!c) return null;
+    c.drawImage(glCanvas, Math.floor(p[0] * d), Math.floor(p[1] * d), 1, 1, 0, 0, 1, 1);
+    const [r, g, b] = c.getImageData(0, 0, 1, 1).data;
+    return "#" + [r, g, b].map((v) => v.toString(16).padStart(2, "0")).join("");
+  }
+
   function local(e: PointerEvent): [number, number] {
     const r = canvas.getBoundingClientRect();
     return [e.clientX - r.left, e.clientY - r.top];
@@ -92,6 +121,12 @@
     if (typing) commitText();
     const p = local(e);
     const tool = editor.tool;
+    if (tool === "picker") {
+      const c = colorAt(p);
+      if (c) editor.color = c;
+      editor.tool = editor.prevTool === "picker" ? "pen" : editor.prevTool;
+      return;
+    }
     if (tool === "eraser") {
       const i = hitTest(editor.edits.markup, toSource(...p), 8 / scale);
       if (i >= 0) change((ed) => ed.markup.splice(i, 1));
@@ -110,17 +145,26 @@
     }
     canvas.setPointerCapture(e.pointerId);
     start = p;
-    draft = tool === "pen" || tool === "highlighter" ? base(tool, [toSource(...p)]) : base(tool, tool === "line" || tool === "arrow" ? [toSource(...p), toSource(...p)] : box(p, p));
+    snapped = false;
+    stroke = [p];
+    draft = tool === "pen" || tool === "pencil" || tool === "highlighter" ? base(tool, [toSource(...p)]) : base(tool, tool === "line" || tool === "arrow" ? [toSource(...p), toSource(...p)] : box(p, p));
+    if (freehand(tool)) armSnap();
   }
 
   function onpointermove(e: PointerEvent) {
-    if (!draft || !start) return;
+    if (!draft || !start || snapped) return;
     const p = local(e);
-    if (draft.kind === "pen" || draft.kind === "highlighter") {
+    if (draft.kind === "pen" || draft.kind === "pencil" || draft.kind === "highlighter") {
       const last = draft.pts[draft.pts.length - 1];
       const next = toSource(...p);
       // Skip points closer than ~1.5 screen px.
       if (Math.hypot(next[0] - last[0], next[1] - last[1]) * scale > 1.5) draft.pts.push(next);
+      // Moving on (more than a few pixels) restarts the hold-to-snap wait.
+      const prev = stroke[stroke.length - 1];
+      if (Math.hypot(p[0] - prev[0], p[1] - prev[1]) > 3) {
+        stroke.push(p);
+        if (freehand(draft.kind)) armSnap();
+      }
     } else if (draft.kind === "line" || draft.kind === "arrow") {
       let q = p;
       // Shift snaps to 45° steps.
@@ -142,6 +186,8 @@
   }
 
   function onpointerup() {
+    if (holdTimer) clearTimeout(holdTimer);
+    holdTimer = null;
     if (!draft) return;
     const d = draft;
     draft = null;
@@ -149,7 +195,7 @@
     // Ignore accidental clicks for drag shapes.
     const [a, b] = [toScreen(d.pts[0]), toScreen(d.pts[d.kind === "rect" || d.kind === "ellipse" || d.kind === "blur" ? 2 : d.pts.length - 1])];
     const moved = Math.hypot(b[0] - a[0], b[1] - a[1]);
-    if (d.kind !== "pen" && d.kind !== "highlighter" && moved < 4) return;
+    if (d.kind !== "pen" && d.kind !== "pencil" && d.kind !== "highlighter" && moved < 4) return;
     change((ed) => ed.markup.push($state.snapshot(d) as Shape));
   }
 
@@ -169,7 +215,7 @@
     }
   }
 
-  const cursor = $derived(!active ? "default" : editor.tool === "text" ? "text" : editor.tool === "eraser" ? "pointer" : "crosshair");
+  const cursor = $derived(!active ? "default" : editor.tool === "text" ? "text" : editor.tool === "eraser" || editor.tool === "picker" ? "pointer" : "crosshair");
 </script>
 
 <canvas

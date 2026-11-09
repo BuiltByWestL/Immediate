@@ -69,13 +69,14 @@ export async function save(target: SaveTarget) {
       target,
       suffix: ui.settings.saveSuffix,
       stripLocation: ui.settings.removeLocation,
-      stripMetadata: false,
+      output: { ...editor.output },
     });
     if (!saved) return;
     stopEditing();
     const name = saved.split(/[\\/]/).pop();
-    const converted = info.saveExt !== file.ext && target !== "as";
-    toast(converted ? `Saved “${name}” (as ${info.saveFormat.toUpperCase()})` : `Saved “${name}”`, undefined, {
+    const savedExt = name?.split(".").pop()?.toLowerCase() ?? "";
+    const converted = savedExt !== file.ext.toLowerCase() && target !== "as";
+    toast(converted ? `Saved “${name}” (as ${savedExt.toUpperCase()})` : `Saved “${name}”`, undefined, {
       label: "Show in folder",
       run: () => invoke("reveal", { path: saved }),
     });

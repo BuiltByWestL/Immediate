@@ -14,7 +14,28 @@ export interface ImageInfo {
   saveExt: string;
   jpegQuality: number | null;
   lossless: boolean;
+  /** Has an HDR gain map, which re-saving drops. */
+  hdr: boolean;
 }
+
+/** Formats Advanced → Save offers. */
+export const FORMATS = [
+  { id: "jpeg", label: "JPEG", ext: "jpg" },
+  { id: "png", label: "PNG", ext: "png" },
+  { id: "webp", label: "WebP", ext: "webp" },
+  { id: "tiff", label: "TIFF", ext: "tif" },
+] as const;
+
+/** Advanced → Save: what the saved photo looks like (null = as the original). */
+export interface Output {
+  format: string | null;
+  quality: number | null;
+  longSide: number | null;
+  maxBytes: number | null;
+  stripAll: boolean;
+}
+
+export const defaultOutput = (): Output => ({ format: null, quality: null, longSide: null, maxBytes: null, stripAll: false });
 
 export type SaveTarget = "copy" | "replace" | "as";
 
@@ -30,21 +51,23 @@ export interface SaveRequest {
   target: SaveTarget;
   suffix: string;
   stripLocation: boolean;
-  stripMetadata: boolean;
+  output: Output;
 }
 
 /** Renders the edits at full size and saves. Returns the saved path, or null if cancelled. */
 export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest): Promise<string | null> {
   let dest: string | null = null;
-  let format: string | undefined;
+  // Advanced → Save's format applies to Save and Save As (Replace keeps the original's).
+  let format: string | undefined = r.target !== "replace" ? (r.output.format ?? undefined) : undefined;
+  const outExt = FORMATS.find((f) => f.id === format)?.ext ?? r.info.saveExt;
   if (r.target === "as") {
     const dot = r.path.lastIndexOf(".");
     const sep = Math.max(r.path.lastIndexOf("\\"), r.path.lastIndexOf("/"));
     const base = r.path.slice(0, dot > sep ? dot : undefined);
     dest = await saveDialog({
-      defaultPath: `${base}${r.suffix}.${r.info.saveExt}`,
+      defaultPath: `${base}${r.suffix}.${outExt}`,
       filters: [
-        { name: r.info.saveFormat.toUpperCase(), extensions: [r.info.saveExt] },
+        { name: (format ?? r.info.saveFormat).toUpperCase(), extensions: [outExt] },
         { name: "JPEG", extensions: ["jpg", "jpeg"] },
         { name: "PNG", extensions: ["png"] },
         { name: "WebP", extensions: ["webp"] },
@@ -54,10 +77,10 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
     if (!dest) return null;
     let ext = dest.split(".").pop()?.toLowerCase() ?? "";
     if (!BY_EXT[ext] || dest.lastIndexOf(".") < Math.max(dest.lastIndexOf("\\"), dest.lastIndexOf("/"))) {
-      dest = `${dest}.${r.info.saveExt}`;
-      ext = r.info.saveExt;
+      dest = `${dest}.${outExt}`;
+      ext = outExt;
     }
-    format = BY_EXT[ext] ?? r.info.saveFormat;
+    format = BY_EXT[ext] ?? format ?? r.info.saveFormat;
   }
 
   // Let the "Saving…" state paint before the (blocking) full-size render.
@@ -71,9 +94,11 @@ export async function saveImage(pipeline: Pipeline, edits: Edits, r: SaveRequest
     dest,
     suffix: r.suffix,
     format,
-    quality: null,
+    quality: r.output.quality,
     stripLocation: r.stripLocation,
-    stripMetadata: r.stripMetadata,
+    stripMetadata: r.output.stripAll,
+    resizeLong: r.output.longSide,
+    targetBytes: r.output.maxBytes,
     // The pixels are in the original's color space unless it had an unusual profile, in which
     // case they were converted to sRGB and the profile must not be attached.
     keepIcc: r.info.colorSpace !== "other",

@@ -67,6 +67,17 @@ pub struct ImageInfo {
     jpeg_quality: Option<u8>,
     /// Lossless WebP original.
     lossless: bool,
+    /// The photo carries an HDR gain map (iPhone, Pixel, Ultra HDR), which re-saving drops.
+    hdr: bool,
+}
+
+/// Signs of an HDR gain map: Adobe/Google "hdrgm" XMP, Apple's gain map auxiliary image, the
+/// ISO 21496-1 gain map metadata.
+fn has_gain_map(bytes: &[u8]) -> bool {
+    const SIGNS: [&[u8]; 5] = [b"hdrgm:", b"HDRGainMap", b"hdrgainmap", b"urn:iso:std:iso:ts:21496", b"GainMapVersion"];
+    // Metadata sits near the start; the second (gain map) picture may follow the first.
+    let head = &bytes[..bytes.len().min(4 << 20)];
+    SIGNS.iter().any(|s| head.windows(s.len()).any(|w| w == *s))
 }
 
 fn ext_of(path: &Path) -> String {
@@ -78,6 +89,7 @@ pub async fn image_info(path: String) -> Result<ImageInfo, String> {
     let path = PathBuf::from(path);
     let ext = ext_of(&path);
     let bytes = std::fs::read(&path).map_err(|e| e.to_string())?;
+    let hdr = has_gain_map(&bytes);
     let parsed = DynImage::from_bytes(Bytes::from(bytes)).ok().flatten();
     let icc_name = parsed.as_ref().and_then(|d| d.icc_profile()).and_then(|icc| meta::icc_description(&icc));
     let color_space = match icc_name.as_deref().map(str::to_lowercase) {
@@ -96,7 +108,7 @@ pub async fn image_info(path: String) -> Result<ImageInfo, String> {
         _ => {}
     }
     let fmt = save_format(&ext);
-    Ok(ImageInfo { icc_name, color_space, save_format: fmt, save_ext: ext_for(fmt, &ext), jpeg_quality, lossless })
+    Ok(ImageInfo { icc_name, color_space, save_format: fmt, save_ext: ext_for(fmt, &ext), jpeg_quality, lossless, hdr })
 }
 
 /// Decodes a picture the webview can't show itself. Returns width and height (u32 LE each),
@@ -190,7 +202,7 @@ pub async fn copy_pixels(request: Request<'_>) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || set_clipboard_image(w, h, rgba)).await.map_err(|e| e.to_string())?
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct SaveOptions {
     source: String,
@@ -206,6 +218,21 @@ struct SaveOptions {
     strip_location: bool,
     strip_metadata: bool,
     keep_icc: bool,
+    /// Shrink so the long side is at most this many pixels (never enlarges).
+    #[serde(default)]
+    resize_long: Option<u32>,
+    /// JPEG/WebP: lower the quality (and if needed the size) until the file fits in this many bytes.
+    #[serde(default)]
+    target_bytes: Option<u64>,
+}
+
+/// Scales RGBA pixels so the long side is `long` pixels (Lanczos), keeping the shape.
+fn shrink(rgba: &[u8], w: u32, h: u32, long: u32) -> Result<(Vec<u8>, u32, u32), String> {
+    let k = long as f64 / w.max(h) as f64;
+    let (nw, nh) = (((w as f64 * k).round() as u32).max(1), ((h as f64 * k).round() as u32).max(1));
+    let img = image::RgbaImage::from_raw(w, h, rgba.to_vec()).ok_or("bad image size")?;
+    let out = image::imageops::resize(&img, nw, nh, image::imageops::FilterType::Lanczos3);
+    Ok((out.into_raw(), nw, nh))
 }
 
 /// Saves edited pixels (the request body, RGBA, top row first). Returns the saved file's path.
@@ -249,6 +276,16 @@ fn urlencoding_decode(s: &str) -> String {
 }
 
 fn save(o: &SaveOptions, rgba: &[u8]) -> Result<PathBuf, String> {
+    // A smaller size first: everything after (metadata, encoding) sees the new dimensions.
+    let resized;
+    let (o, rgba): (&SaveOptions, &[u8]) = match o.resize_long.filter(|l| *l >= 16 && *l < o.width.max(o.height)) {
+        Some(long) => {
+            let (px, w, h) = shrink(rgba, o.width, o.height, long)?;
+            resized = (SaveOptions { width: w, height: h, ..o.clone() }, px);
+            (&resized.0, &resized.1)
+        }
+        None => (o, rgba),
+    };
     let source = PathBuf::from(&o.source);
     let src_ext = ext_of(&source);
     let format = o.format.clone().unwrap_or_else(|| save_format(&src_ext).to_owned());
@@ -273,8 +310,10 @@ fn save(o: &SaveOptions, rgba: &[u8]) -> Result<PathBuf, String> {
     };
     let lossless = matches!(&src_parsed, Some(DynImage::WebP(w)) if matches!(w.kind(), img_parts::vp8::VP8Kind::VP8L));
 
-    let encoded = encode(&format, rgba, o.width, o.height, quality, sampling, lossless)?;
-    let encoded = with_metadata(encoded, src_parsed.as_ref(), o)?;
+    let encoded = match o.target_bytes.filter(|_| matches!(format.as_str(), "jpeg" | "webp")) {
+        Some(limit) => fit_in(&format, rgba, o, quality, sampling, src_parsed.as_ref(), limit)?,
+        None => with_metadata(encode(&format, rgba, o.width, o.height, quality, sampling, lossless)?, src_parsed.as_ref(), o)?,
+    };
 
     let ext = ext_for(&format, &src_ext);
     let dest = match o.target.as_str() {
@@ -307,6 +346,47 @@ fn save(o: &SaveOptions, rgba: &[u8]) -> Result<PathBuf, String> {
         friendly_io(e, dir)
     })?;
     Ok(dest)
+}
+
+/// The best JPEG/WebP that fits in `limit` bytes: the highest quality that fits (down to 40),
+/// then smaller sizes if even that is too big.
+fn fit_in(format: &str, rgba: &[u8], o: &SaveOptions, start_q: u8, sampling: Option<(u8, u8)>, src: Option<&DynImage>, limit: u64) -> Result<Vec<u8>, String> {
+    const MIN_Q: u8 = 40;
+    let mut px = rgba.to_vec();
+    let mut opts = o.clone();
+    for _ in 0..6 {
+        let at = |q: u8, px: &[u8], opts: &SaveOptions| -> Result<Vec<u8>, String> {
+            with_metadata(encode(format, px, opts.width, opts.height, q, sampling, false)?, src, opts)
+        };
+        let best = at(start_q, &px, &opts)?;
+        if best.len() as u64 <= limit {
+            return Ok(best);
+        }
+        let floor = at(MIN_Q, &px, &opts)?;
+        if floor.len() as u64 <= limit {
+            // Binary search for the highest quality that fits.
+            let (mut lo, mut hi, mut found) = (MIN_Q, start_q, floor);
+            while hi - lo > 1 {
+                let mid = (lo + hi) / 2;
+                let e = at(mid, &px, &opts)?;
+                if e.len() as u64 <= limit {
+                    lo = mid;
+                    found = e;
+                } else {
+                    hi = mid;
+                }
+            }
+            return Ok(found);
+        }
+        // Still too big at the lowest quality: fewer pixels (file size follows the area).
+        let k = ((limit as f64 / floor.len() as f64).sqrt() * 0.95).clamp(0.3, 0.95);
+        let long = ((opts.width.max(opts.height) as f64) * k) as u32;
+        let (p, w, h) = shrink(&px, opts.width, opts.height, long.max(16))?;
+        px = p;
+        opts.width = w;
+        opts.height = h;
+    }
+    Err("Couldn’t make the picture that small. Pick a larger size limit.".into())
 }
 
 fn friendly_io(e: std::io::Error, dir: &Path) -> String {
@@ -475,6 +555,8 @@ mod tests {
             quality: None,
             strip_location: false,
             strip_metadata: false,
+            resize_long: None,
+            target_bytes: None,
             keep_icc: true,
         };
         let saved = save(&o, &px).unwrap();
@@ -488,5 +570,55 @@ mod tests {
         // A second save doesn't overwrite the first.
         assert_eq!(save(&o, &px).unwrap().file_name().unwrap(), "photo edited 2.jpg");
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn resize_and_fit_under_a_size() {
+        let dir = std::env::temp_dir().join(format!("immediate-fit-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        // Noisy pixels compress badly, so the size limit has real work to do.
+        let (w, h) = (1200u32, 800u32);
+        let mut seed = 7u32;
+        let px: Vec<u8> = (0..w * h)
+            .flat_map(|_| {
+                seed = seed.wrapping_mul(1_103_515_245).wrapping_add(12345);
+                let v = (seed >> 16) as u8;
+                [v, v.wrapping_mul(3), 255 - v, 255]
+            })
+            .collect();
+        let source = dir.join("noise.png");
+        image::RgbaImage::from_raw(w, h, px.clone()).unwrap().save(&source).unwrap();
+        let base = SaveOptions {
+            source: source.to_string_lossy().into(),
+            width: w,
+            height: h,
+            target: "copy".into(),
+            dest: None,
+            suffix: " edited".into(),
+            format: Some("jpeg".into()),
+            quality: Some(92),
+            strip_location: false,
+            strip_metadata: false,
+            keep_icc: true,
+            resize_long: None,
+            target_bytes: None,
+        };
+        // Long side 600: 600 x 400.
+        let small = save(&SaveOptions { resize_long: Some(600), ..base.clone() }, &px).unwrap();
+        assert_eq!(image::image_dimensions(&small).unwrap(), (600, 400));
+        // Never enlarged.
+        let same = save(&SaveOptions { resize_long: Some(5000), ..base.clone() }, &px).unwrap();
+        assert_eq!(image::image_dimensions(&same).unwrap(), (1200, 800));
+        // Fits under 150 KB (quality first, then fewer pixels).
+        let fit = save(&SaveOptions { target_bytes: Some(150_000), ..base.clone() }, &px).unwrap();
+        assert!(std::fs::metadata(&fit).unwrap().len() <= 150_000);
+        std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn spots_hdr_gain_maps() {
+        assert!(has_gain_map(b"....<x:xmpmeta> hdrgm:Version=\"1.0\" ..."));
+        assert!(has_gain_map(b"urn:com:apple:photo:2020:aux:hdrgainmap"));
+        assert!(!has_gain_map(b"an ordinary JPEG with Exif"));
     }
 }

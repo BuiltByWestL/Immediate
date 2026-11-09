@@ -6,6 +6,7 @@
   import CropPanel from "./CropPanel.svelte";
   import FiltersPanel from "./FiltersPanel.svelte";
   import MarkupPanel from "./MarkupPanel.svelte";
+  import SavePanel from "./SavePanel.svelte";
   import Slider from "./Slider.svelte";
 
   const TABS: [Tab, string][] = [
@@ -13,9 +14,15 @@
     ["filters", "Filters"],
     ["crop", "Crop"],
     ["markup", "Markup"],
+    ["save", "Save"],
   ];
 
   const advanced = $derived(ui.settings.mode === "advanced");
+  // Save options are an Advanced tool.
+  const tabs = $derived(TABS.filter(([id]) => advanced || id !== "save"));
+  $effect(() => {
+    if (!advanced && editor.tab === "save") editor.tab = "adjust";
+  });
   const sections = $derived(
     SECTIONS.map((s) => ({ ...s, sliders: s.sliders.filter((d) => advanced || d.simple) })).filter((s) => s.sliders.length),
   );
@@ -40,7 +47,7 @@
 
 <aside class="inspector" aria-label="Edit">
   <div class="tabs segmented" role="tablist">
-    {#each TABS as [id, label] (id)}
+    {#each tabs as [id, label] (id)}
       <button type="button" role="tab" aria-selected={editor.tab === id} onclick={() => (editor.tab = id)}>
         {label}
       </button>
@@ -58,6 +65,9 @@
           <button type="button" role="radio" aria-checked={advanced} onclick={() => updateSettings({ mode: "advanced" })}>Advanced</button>
         </div>
       </div>
+      {#if editor.ready && session.info?.hdr}
+        <p class="note">This is an HDR photo. Saving keeps the picture but not its extra brightness on HDR screens.</p>
+      {/if}
       {#if hidden}
         <p class="note">
           {hidden === 1 ? "1 edit" : `${hidden} edits`} from Advanced {hidden === 1 ? "is" : "are"} still applied.
@@ -77,8 +87,10 @@
       <FiltersPanel />
     {:else if editor.tab === "crop"}
       <CropPanel />
-    {:else}
+    {:else if editor.tab === "markup"}
       <MarkupPanel />
+    {:else}
+      <SavePanel />
     {/if}
   </div>
 </aside>
