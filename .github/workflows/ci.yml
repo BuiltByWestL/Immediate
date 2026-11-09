@@ -29,6 +29,8 @@ jobs:
         run: npm run check
       - name: Theme contrast
         run: npm run test:themes
+      - name: Photo pipeline golden images (preview = saved; no drift)
+        run: npm run test:golden
       - name: File associations are up to date with src/formats.json
         run: node scripts/gen-associations.mjs --check
 
