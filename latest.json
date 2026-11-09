@@ -1,11 +1,23 @@
 {
-  "version": "0.1.1",
-  "notes": "Test release used to verify that installed copies update themselves.",
-  "pub_date": "2026-11-07T07:03:09Z",
+  "version": "0.2.0",
+  "notes": "See the commits since the last release.",
+  "pub_date": "2026-11-09T02:19:51Z",
   "platforms": {
+    "linux-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR01hMGNzNnhxREFJRmE1TEhmQmFQZkphKzV5a0FSRUVKb0Q2MFRCWHVJKzR2M1FMNGZLek9vRG4zNUZ2M0w5S1V5eUhrU3FjYlVCYlpkQVlFTkZValFFPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTkwNzkwCWZpbGU6SW1tZWRpYXRlXzAuMi4wX2FtZDY0LkFwcEltYWdlCXZlcnNpb246MC4yLjAKZjkzQTZIS1dXUkNxTEFUT1lQUXZWeGt6MjNSU09ObXNWa1FycmNJUjE2ek90VENLQzdkd0NPeWhiTTZ2eTJUMWVFREN0NnNobzhFRjJvT2xmdU1sREE9PQo=",
+      "url": "https://github.com/BuiltByWestL/Immediate/releases/download/v0.2.0/Immediate_0.2.0_amd64.AppImage"
+    },
     "windows-x86_64": {
-      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR01OM2s2V3g4YmE4bGVPV01wRlpSWjJCQnRjeEJZMVZtSFlPdjdMMHIxRFB6aTRsdnROWFM2U1dEZ21rbm9HeHdUWHdlVEw0NVFvNC8rVDBib1I5REFRPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MDM0OTcwCWZpbGU6SW1tZWRpYXRlXzAuMS4xX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjEuMQptRWdBNllZcXdFUENMRXV1TUVTN3Biend2NXBMNkw4SitXQ0ZiMUZxTk50cUp1SG03ZW1PeENlNmpiZjhYTXBBcjJ1TE5mNHd2ekpWZnY5U2ZBTG9EZz09Cg==",
-      "url": "https://api.github.com/repos/BuiltByWestL/Immediate/releases/assets/719921502"
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR0UwL2xpQ0FJa1lFUVEzSDRZeUlWSllCR2FST0pOdkFJRTlLZ2VVMkRPN0xhUjduYXFtNU5RV1BPdXRNYjJwRUtrNFNoeUVyMGx4SCtNcnc2VzhpUlF3PQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTkwOTA2CWZpbGU6SW1tZWRpYXRlXzAuMi4wX3g2NC1zZXR1cC5leGUJdmVyc2lvbjowLjIuMAp2VHRLZVVPV3JxUkhLV2g2KzZlQzdKdHkzMnAzNG9VYmZoeHNIUHNKRDhVNTdMV0Y1NlN0cHZicWN2dUhXMW9MNnVkQy9sUWR1YTl1ekZxbnJXVFhCUT09Cg==",
+      "url": "https://github.com/BuiltByWestL/Immediate/releases/download/v0.2.0/Immediate_0.2.0_x64-setup.exe"
+    },
+    "darwin-aarch64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR05nVmlnT2NMWmtDYURlNW1QeDQ1dXZ6OU9WNmY2MU9HblYweTZoa0FGMC9JQVpmU3k5MUdCaHJnWC8yT25GOXpyVFcvNno3OG03dkJmeTRjUng3Z0FZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTkxMTkyCWZpbGU6SW1tZWRpYXRlLmFwcC50YXIuZ3oJdmVyc2lvbjowLjIuMApzampIQjBLb3R1MHZwb2s5YnBuRE1uT2VFMHpUS2hNSGJWcmt2amNVNTZqbzJuSGtXOXpSaXJFb3lkSmhBMWpWVUxraGdmcmV6V3pFTHlLbFpQek5DUT09Cg==",
+      "url": "https://github.com/BuiltByWestL/Immediate/releases/download/v0.2.0/Immediate_aarch64.app.tar.gz"
+    },
+    "darwin-x86_64": {
+      "signature": "dW50cnVzdGVkIGNvbW1lbnQ6IHNpZ25hdHVyZSBmcm9tIHRhdXJpIHNlY3JldCBrZXkKUlVSaEpGYXRHaTRpR0grdlNnZ284cVdLZlZlNlA3KzBrbitEZU95RTVOTFZVSXp3cldhVEJnWlEwcXRFU1dSOEpRcXpWekIxMmFBem15VzlkOHRpclhqaXZmSnlITEMraWdZPQp0cnVzdGVkIGNvbW1lbnQ6IHRpbWVzdGFtcDoxNzk0MTkxMDIyCWZpbGU6SW1tZWRpYXRlLmFwcC50YXIuZ3oJdmVyc2lvbjowLjIuMApvL1hpK0RleTFsVkphNWh6Y2VqVndMb0RiWjNPRVBiLzdZM21HUDhEVHd4WU9wSVVHR0pFUUswTnJLQjNiUEJoNUVoeWRNZklSRjJzVVViWSt3VTNCZz09Cg==",
+      "url": "https://github.com/BuiltByWestL/Immediate/releases/download/v0.2.0/Immediate_x64.app.tar.gz"
     }
   }
 }
