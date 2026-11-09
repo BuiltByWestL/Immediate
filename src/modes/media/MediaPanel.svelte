@@ -8,6 +8,7 @@
   import SquareSplitHorizontal from "@lucide/svelte/icons/square-split-horizontal";
   import X from "@lucide/svelte/icons/x";
   import Music from "@lucide/svelte/icons/music";
+  import VolumeX from "@lucide/svelte/icons/volume-x";
   import Download from "@lucide/svelte/icons/download";
   import Image from "@lucide/svelte/icons/image";
   import { convertFileSrc } from "@tauri-apps/api/core";
@@ -15,7 +16,7 @@
   import { ui, updateSettings } from "../../lib/app.svelte";
   import Slider from "../image/Slider.svelte";
   import { grabFrame, saveSubtitles } from "./actions";
-  import { blankEdit, changeMedia, commitMedia, cutSelection, fmtTime, keptSegments, media, pictureChanged, snappedSegments, splitAt, totalLength, type Range2D } from "./session.svelte";
+  import { blankEdit, changeMedia, commitMedia, cutSelection, fmtTime, GEQ_BANDS, keptSegments, media, pictureChanged, silenceSelection, snappedSegments, splitAt, totalLength, type Range2D } from "./session.svelte";
 
   let { isVideo, seek }: { isVideo: boolean; seek: (t: number) => void } = $props();
 
@@ -181,6 +182,23 @@
   const srcRate = $derived(Number(audios[0]?.sample_rate) || 0);
   const srcBits = $derived(Number(audios[0]?.bits_per_raw_sample) || Number(audios[0]?.bits_per_sample) || (String(audios[0]?.codec_name).match(/(\d+)/)?.[1] ? Number(String(audios[0]?.codec_name).match(/(\d+)/)?.[1]) : 0));
   const RATES = [44100, 48000, 96000];
+  const srcChannels = $derived(Number(audios[0]?.channels) || 0);
+
+  // Equalizer.
+  const EQ_PRESETS = [
+    { name: "Flat", bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+    { name: "Voice", bands: [-4, -3, -2, 0, 0, 1, 3, 3, 1, 0] },
+    { name: "More bass", bands: [6, 5, 4, 2, 0, 0, 0, 0, 0, 0] },
+    { name: "More treble", bands: [0, 0, 0, 0, 0, 0, 1, 3, 5, 6] },
+    { name: "Fuller", bands: [5, 4, 2, 0, -1, -1, 0, 2, 4, 5] },
+    { name: "Less hiss", bands: [0, 0, 0, 0, 0, 0, 0, -2, -6, -9] },
+  ];
+  const LOW_CUTS = [0, 40, 80, 120, 200];
+  const HIGH_CUTS = [0, 16000, 12000, 8000, 3400];
+  const bandName = (f: number) => (f >= 1000 ? `${f / 1000}k` : String(f));
+
+  // Clipping: the loudest sample after the volume change goes over full scale.
+  const clips = $derived(!media.edit.normalize && media.peak * Math.pow(10, media.edit.gain / 20) > 1.0);
   const deep = $derived(["wav", "flac", "aif", "aiff"].includes(ext));
 </script>
 
@@ -205,8 +223,17 @@
           </button>
         {/if}
         <button type="button" class="btn" disabled={!sel} onclick={keepSelection}>Keep only this</button>
+        {#if !isVideo}
+          <button type="button" class="btn" disabled={!sel} onclick={silenceSelection} title="Make the selected part silent, keeping its length"><VolumeX size={16} strokeWidth={1.5} />Silence</button>
+        {/if}
       </div>
       {#if sel}<p class="hint num">Selected {fmtTime(sel.end - sel.start, true)}</p>{/if}
+      {#if media.edit.silences.length}
+        <p class="hint">
+          {media.edit.silences.length === 1 ? "1 part is" : `${media.edit.silences.length} parts are`} silenced.
+          <button type="button" class="link" onclick={() => changeMedia((e) => (e.silences = []))}>Bring the sound back</button>
+        </p>
+      {/if}
     </section>
 
     {#if audios.length}
@@ -218,6 +245,9 @@
         {#if !media.edit.mute}
           {#if advanced || !isVideo}
             <Slider label="Volume (dB)" min={-20} max={20} bind:value={media.edit.gain} oncommit={commitMedia} />
+            {#if clips}
+              <p class="note warn">The loudest parts will be too loud and distort. Lower the volume a little, or turn on Even out loudness.</p>
+            {/if}
           {/if}
           {#if advanced || !isVideo}
             <div class="fades">
@@ -238,11 +268,61 @@
               <span>Even out loudness</span>
               <button type="button" class="switch" role="switch" aria-checked={media.edit.normalize} aria-label="Even out loudness" onclick={() => changeMedia((e) => (e.normalize = !e.normalize))}></button>
             </div>
+            {#if advanced && media.edit.normalize}
+              <div class="chips" role="radiogroup" aria-label="Even out by">
+                <button type="button" class="chip" role="radio" aria-checked={!media.edit.normalizePeak} onclick={() => changeMedia((e) => (e.normalizePeak = false))}>By loudness</button>
+                <button type="button" class="chip" role="radio" aria-checked={media.edit.normalizePeak} onclick={() => changeMedia((e) => (e.normalizePeak = true))}>By the loudest peak</button>
+              </div>
+              <p class="hint">
+                {media.edit.normalizePeak
+                  ? "Raises or lowers everything so the loudest moment sits just below the maximum (-1 dB). Nothing else changes."
+                  : "Sets an even, comfortable level (-16 LUFS, common for speech and music online)."}
+              </p>
+            {/if}
             {#if advanced}
               <h3 class="sub">Tone</h3>
               <Slider label="Bass" min={-12} max={12} bind:value={media.edit.eq[0]} oncommit={commitMedia} />
               <Slider label="Mid" min={-12} max={12} bind:value={media.edit.eq[1]} oncommit={commitMedia} />
               <Slider label="Treble" min={-12} max={12} bind:value={media.edit.eq[2]} oncommit={commitMedia} />
+              <h3 class="sub">Equalizer</h3>
+              <div class="chips" role="radiogroup" aria-label="Equalizer preset">
+                {#each EQ_PRESETS as p (p.name)}
+                  <button type="button" class="chip" role="radio" aria-checked={p.bands.every((g, i) => g === media.edit.geq[i])} onclick={() => changeMedia((e) => (e.geq = [...p.bands]))}>{p.name}</button>
+                {/each}
+              </div>
+              <div class="geq" role="group" aria-label="Equalizer bands">
+                {#each GEQ_BANDS as f, i (f)}
+                  <label class="band" title="{bandName(f)}: {media.edit.geq[i] > 0 ? '+' : ''}{media.edit.geq[i]} dB (double-click to reset)">
+                    <span class="num gain">{media.edit.geq[i] > 0 ? "+" : ""}{media.edit.geq[i]}</span>
+                    <input
+                      type="range"
+                      min="-12"
+                      max="12"
+                      step="1"
+                      bind:value={media.edit.geq[i]}
+                      onchange={commitMedia}
+                      ondblclick={() => changeMedia((e) => (e.geq[i] = 0))}
+                      aria-label="{bandName(f)} (dB)"
+                    />
+                    <span class="num">{bandName(f)}</span>
+                  </label>
+                {/each}
+              </div>
+              <div class="fades">
+                <label>
+                  <span>Low cut</span>
+                  <select class="field" value={String(media.edit.lowCut)} onchange={(e) => changeMedia((ed) => (ed.lowCut = Number(e.currentTarget.value)))}>
+                    {#each LOW_CUTS as f (f)}<option value={String(f)}>{f ? `Below ${f} Hz` : "Off"}</option>{/each}
+                  </select>
+                </label>
+                <label>
+                  <span>High cut</span>
+                  <select class="field" value={String(media.edit.highCut)} onchange={(e) => changeMedia((ed) => (ed.highCut = Number(e.currentTarget.value)))}>
+                    {#each HIGH_CUTS as f (f)}<option value={String(f)}>{f ? `Above ${bandName(f)}` : "Off"}</option>{/each}
+                  </select>
+                </label>
+              </div>
+              <p class="hint">Low cut removes rumble and hum; high cut removes hiss.</p>
               <div class="toggle">
                 <span>Reduce background noise</span>
                 <button type="button" class="switch" role="switch" aria-checked={media.edit.denoise} aria-label="Reduce background noise" onclick={() => changeMedia((e) => (e.denoise = !e.denoise))}></button>
@@ -253,7 +333,7 @@
                 <button type="button" class="switch" role="switch" aria-checked={media.edit.compress} aria-label="Level out loud and quiet parts" onclick={() => changeMedia((e) => (e.compress = !e.compress))}></button>
               </div>
             {/if}
-            {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize || media.edit.eq.some((g) => g) || media.edit.denoise || media.edit.compress)}
+            {#if isVideo && (media.edit.fadeIn || media.edit.fadeOut || media.edit.normalize || media.edit.eq.some((g) => g) || media.edit.geq.some((g) => g) || media.edit.lowCut || media.edit.highCut || media.edit.denoise || media.edit.compress)}
               <p class="note">Saving re-encodes the video to apply these sound changes, so it takes longer.</p>
             {/if}
           {/if}
@@ -312,6 +392,13 @@
           </div>
           {#if !media.edit.keepPitch}<p class="hint">The pitch follows the speed, like a tape played faster or slower.</p>{/if}
         {/if}
+        {#if !isVideo}
+          <div class="toggle">
+            <span>Play backwards</span>
+            <button type="button" class="switch" role="switch" aria-checked={media.edit.reverse} aria-label="Play backwards" onclick={() => changeMedia((e) => (e.reverse = !e.reverse))}></button>
+          </div>
+          {#if media.edit.reverse}<p class="hint">Heard in the saved file; it plays forwards here so you can still find your place.</p>{/if}
+        {/if}
       </section>
     {/if}
 
@@ -347,6 +434,14 @@
           >
             <option value="">Same{srcRate ? ` (${srcRate / 1000} kHz)` : ""}</option>
             {#each RATES.filter((r) => r !== srcRate) as r (r)}<option value={String(r)}>{r / 1000} kHz</option>{/each}
+          </select>
+        </label>
+        <label class="tag">
+          <span>Channels</span>
+          <select class="field" value={String(media.edit.channels ?? "")} onchange={(e) => changeMedia((ed) => (ed.channels = e.currentTarget.value ? (Number(e.currentTarget.value) as 1 | 2) : null))}>
+            <option value="">Same{srcChannels === 1 ? " (mono)" : srcChannels === 2 ? " (stereo)" : ""}</option>
+            {#if srcChannels !== 1}<option value="1">Mono</option>{/if}
+            {#if srcChannels !== 2}<option value="2">Stereo</option>{/if}
           </select>
         </label>
         {#if deep}
@@ -547,6 +642,35 @@
   .row .btn {
     flex: 1;
     padding: 0 var(--s1);
+  }
+  .geq {
+    display: grid;
+    grid-template-columns: repeat(10, 1fr);
+    gap: 2px;
+    margin-top: var(--s2);
+  }
+  .band {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--s1);
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .band .gain {
+    color: var(--text);
+    min-height: 14px;
+  }
+  .band input {
+    writing-mode: vertical-lr;
+    direction: rtl;
+    width: 20px;
+    height: 110px;
+    margin: 0;
+    accent-color: var(--accent);
+  }
+  .note.warn {
+    color: var(--danger);
   }
   .added {
     display: flex;

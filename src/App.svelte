@@ -115,7 +115,7 @@
     if (rec.open && !ui.dialog) {
       const k = key.toLowerCase();
       if (rec.phase === "ready" && (k === "r" || key === " ")) startRecording();
-      else if (rec.phase === "ready" && key === "Escape") closeRecorder();
+      else if ((rec.phase === "ready" || rec.phase === "counting") && key === "Escape") closeRecorder();
       else if (rec.phase === "recording" && (key === " " || key === "Enter")) stopRecording(true);
       else if (rec.phase === "recording" && k === "p") togglePause();
       else return;

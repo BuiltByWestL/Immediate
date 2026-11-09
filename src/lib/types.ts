@@ -17,6 +17,7 @@ export interface Settings {
   videoMode: "lossless" | "accurate";
   hardwareEncode: boolean;
   recordDevice: string;
+  countIn: boolean;
   audioFormat: "" | "wav" | "flac" | "mp3" | "m4a" | "opus" | "ogg" | "aiff";
   keepReady: boolean;
   lastUpdateCheck: number;
@@ -39,6 +40,7 @@ export const DEFAULT_SETTINGS: Settings = {
   videoMode: "lossless",
   hardwareEncode: false,
   recordDevice: "",
+  countIn: false,
   audioFormat: "",
   keepReady: false,
   lastUpdateCheck: 0,

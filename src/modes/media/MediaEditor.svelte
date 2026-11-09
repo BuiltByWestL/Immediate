@@ -10,7 +10,7 @@
   import type { OpenedFile } from "../../lib/types";
   import MediaPanel from "./MediaPanel.svelte";
   import { mediaKeys } from "./keys";
-  import { commitMedia as commit, cutSelection, fmtTime, keptSegments, media, nextKept, splitAt, totalLength } from "./session.svelte";
+  import { commitMedia as commit, cutSelection, fmtTime, GEQ_BANDS, keptSegments, media, nextKept, silencedAt, soundOf, splitAt, totalLength } from "./session.svelte";
   import CropFrame from "./CropFrame.svelte";
   import Timeline from "./Timeline.svelte";
 
@@ -62,7 +62,7 @@
         el.currentTime = next;
       }
       media.time = el.currentTime;
-      if (audio) audio.fade.gain.setTargetAtTime(fadeAt(el.currentTime), audio.ctx.currentTime, 0.015);
+      if (audio) audio.fade.gain.setTargetAtTime(levelAt(el.currentTime), audio.ctx.currentTime, 0.005);
     }
     raf = requestAnimationFrame(tick);
   }
@@ -173,8 +173,21 @@
   // Live sound: volume, fades, loudness, tone and leveling are heard while playing, through Web
   // Audio nodes in the same order as the filters used when saving (export.rs): volume → tone →
   // leveling → loudness → fades. Only noise reduction is save-only.
-  type LiveAudio = { ctx: AudioContext; gain: GainNode; eq: BiquadFilterNode[]; comp: DynamicsCompressorNode; norm: GainNode; limiter: DynamicsCompressorNode; fade: GainNode };
+  type LiveAudio = {
+    ctx: AudioContext;
+    gain: GainNode;
+    cuts: BiquadFilterNode[];
+    eq: BiquadFilterNode[];
+    geq: BiquadFilterNode[];
+    comp: DynamicsCompressorNode;
+    norm: GainNode;
+    limiter: DynamicsCompressorNode;
+    fade: GainNode;
+  };
   let audio = $state.raw<LiveAudio | null>(null);
+
+  /** Fades, and silence in silenced parts. */
+  const levelAt = (t: number) => (silencedAt(t) ? 0 : fadeAt(t));
 
   /** Fade level at source time t, measured along the kept parts like the saved file. */
   function fadeAt(t: number) {
@@ -206,7 +219,7 @@
   let measureReq = 0;
   $effect(() => {
     const e = media.edit;
-    const args = { path: file.path, segments: kept.map((s) => ({ start: s.start, end: s.end })), gainDb: e.gain, eq: [...e.eq], denoise: e.denoise, compress: e.compress };
+    const args = { path: file.path, segments: kept.map((s) => ({ start: s.start, end: s.end })), sound: soundOf(e), peak: e.normalizePeak };
     if (!e.normalize) return;
     const req = ++measureReq;
     const t = setTimeout(() => {
@@ -234,6 +247,15 @@
       };
       // Same bands as saving (export.rs): where laptop and phone speakers can play them.
       const eq = [mk("lowshelf", 200), mk("peaking", 1000), mk("highshelf", 4000)];
+      const geq = GEQ_BANDS.map((f) => {
+        const b = mk("peaking", f);
+        b.Q.value = 1.41;
+        return b;
+      });
+      // Low and high cut: Butterworth, like saving. Web Audio gives these filters' Q in dB
+      // (0.707 = -3.01 dB). "Off" is a cut at the very ends, which lets everything through.
+      const cuts = [mk("highpass", 1), mk("lowpass", ctx.sampleRate / 2)];
+      for (const c of cuts) c.Q.value = -3.0103;
       const comp = ctx.createDynamicsCompressor();
       comp.threshold.value = -20;
       comp.ratio.value = 3;
@@ -246,12 +268,13 @@
       limiter.ratio.value = 20;
       limiter.attack.value = 0.001;
       limiter.release.value = 0.05;
-      src.connect(gain).connect(eq[0]).connect(eq[1]).connect(eq[2]);
+      let chain: AudioNode = src.connect(gain);
+      for (const n of [...cuts, ...eq, ...geq]) chain = chain.connect(n);
       fade.connect(ctx.destination);
       gain.gain.value = Math.pow(10, media.edit.gain / 20);
       norm.gain.value = Math.pow(10, liveNorm.db / 20);
-      fade.gain.value = fadeAt(el.currentTime);
-      audio = { ctx, gain, eq, comp, norm, limiter, fade };
+      fade.gain.value = levelAt(el.currentTime);
+      audio = { ctx, gain, cuts, eq, geq, comp, norm, limiter, fade };
       route(media.edit.compress, liveNorm.limit);
     } catch {
       /* plays without live effects */
@@ -264,8 +287,9 @@
     const key = `${compress}${limit}`;
     if (!a || routed === key) return;
     routed = key;
-    for (const n of [a.eq[2], a.comp, a.norm, a.limiter]) n.disconnect();
-    (compress ? a.eq[2].connect(a.comp) : a.eq[2]).connect(a.norm);
+    const last = a.geq[a.geq.length - 1];
+    for (const n of [last, a.comp, a.norm, a.limiter]) n.disconnect();
+    (compress ? last.connect(a.comp) : last).connect(a.norm);
     (limit ? a.norm.connect(a.limiter) : a.norm).connect(a.fade);
   }
   // Follow every sound setting while playing. Read them all before checking `audio`, so the
@@ -275,6 +299,9 @@
     const n = Math.pow(10, liveNorm.db / 20);
     const limit = liveNorm.limit;
     const eq = [...media.edit.eq];
+    const geq = [...media.edit.geq];
+    const { lowCut, highCut } = media.edit;
+    const mono = media.edit.channels === 1;
     const compress = media.edit.compress;
     const a = audio;
     if (!a) return;
@@ -282,6 +309,12 @@
     a.gain.gain.setTargetAtTime(gain, now, 0.02);
     a.norm.gain.setTargetAtTime(n, now, 0.05);
     eq.forEach((g, i) => a.eq[i].gain.setTargetAtTime(g, now, 0.02));
+    geq.forEach((g, i) => a.geq[i].gain.setTargetAtTime(g, now, 0.02));
+    a.cuts[0].frequency.setTargetAtTime(lowCut || 1, now, 0.02);
+    a.cuts[1].frequency.setTargetAtTime(highCut || a.ctx.sampleRate / 2, now, 0.02);
+    // Mono: mix both channels into one, which then plays from both speakers.
+    a.gain.channelCount = mono ? 1 : 2;
+    a.gain.channelCountMode = mono ? "explicit" : "max";
     route(compress, limit);
   });
   $effect(() => () => audio?.ctx.close());

@@ -4,7 +4,7 @@
   // scroll to zoom.
   import { invoke } from "@tauri-apps/api/core";
   import { onMount } from "svelte";
-  import { commitMedia, fmtTime, keptSegments, liveSplits, media, partAt, snappedSegments } from "./session.svelte";
+  import { commitMedia, fmtTime, keptSegments, liveSplits, media, partAt, silencedAt, snappedSegments } from "./session.svelte";
 
   let { path, video, seek }: { path: string; video: boolean; seek: (t: number) => void } = $props();
 
@@ -24,7 +24,10 @@
 
   onMount(() => {
     invoke<number[]>("media_waveform", { path, buckets: 4000 })
-      .then((p) => (peaks = Float32Array.from(p)))
+      .then((p) => {
+        peaks = Float32Array.from(p);
+        media.peak = peaks.reduce((m, v) => Math.max(m, Math.abs(v)), 0);
+      })
       .catch(() => (peaks = new Float32Array(0)));
   });
 
@@ -114,6 +117,10 @@
       c.fillStyle = media.edit.mute ? line : dim;
       const mid = waveTop + waveH / 2;
       for (let x = 0; x < width; x++) {
+        if (silencedAt(x2t(x))) {
+          c.fillRect(x, mid, 1, 1);
+          continue;
+        }
         const a = Math.floor((x2t(x) / media.duration) * n);
         const b = Math.max(a + 1, Math.floor((x2t(x + 1) / media.duration) * n));
         let lo = 0, hi = 0;

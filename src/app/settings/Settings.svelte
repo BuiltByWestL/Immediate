@@ -250,6 +250,10 @@
               {#if s.recordDevice && !mics.includes(s.recordDevice)}<option value={s.recordDevice}>{s.recordDevice} (not connected)</option>{/if}
             </select>
           </label>
+          <div class="row">
+            <span>Count 3, 2, 1 before recording</span>
+            <button type="button" class="switch" role="switch" aria-checked={s.countIn} aria-label="Count 3, 2, 1 before recording" onclick={() => set({ countIn: !s.countIn })}></button>
+          </div>
         </section>
         <section>
           <h3>Saving</h3>

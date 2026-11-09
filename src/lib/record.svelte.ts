@@ -6,7 +6,9 @@ import { openPaths, toast, ui, updateSettings } from "./app.svelte";
 
 export const rec = $state({
   open: false,
-  phase: "ready" as "ready" | "recording" | "stopping",
+  phase: "ready" as "ready" | "counting" | "recording" | "stopping",
+  /** Seconds left in the count-in. */
+  count: 0,
   paused: false,
   devices: [] as string[],
   device: "",
@@ -32,6 +34,7 @@ export async function openRecorder() {
 }
 
 export function closeRecorder() {
+  cancelCountIn();
   if (rec.phase === "recording") return;
   rec.open = false;
 }
@@ -42,7 +45,33 @@ function name() {
   return `Recording ${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())} ${p(d.getHours())}.${p(d.getMinutes())}.${p(d.getSeconds())}`;
 }
 
+let counting: ReturnType<typeof setInterval> | null = null;
+
+/** Starts recording, after a 3-2-1 count-in when that's on (Settings → Audio, or here). */
 export async function startRecording() {
+  if (rec.phase !== "ready") return;
+  if (ui.settings.countIn) {
+    rec.phase = "counting";
+    rec.count = 3;
+    counting = setInterval(() => {
+      rec.count--;
+      if (rec.count > 0) return;
+      cancelCountIn();
+      record();
+    }, 1000);
+    return;
+  }
+  await record();
+}
+
+/** Stops a count-in before recording starts. */
+export function cancelCountIn() {
+  if (counting) clearInterval(counting);
+  counting = null;
+  if (rec.phase === "counting") rec.phase = "ready";
+}
+
+async function record() {
   if (rec.phase !== "ready") return;
   unlisten ??= await listen<{ peak: number; seconds: number; paused: boolean }>("rec", (e) => {
     rec.peak = e.payload.peak;

@@ -4,7 +4,8 @@
   import Square from "@lucide/svelte/icons/square";
   import Trash from "@lucide/svelte/icons/trash-2";
   import X from "@lucide/svelte/icons/x";
-  import { closeRecorder, rec, startRecording, stopRecording, togglePause } from "../lib/record.svelte";
+  import { ui, updateSettings } from "../lib/app.svelte";
+  import { cancelCountIn, closeRecorder, rec, startRecording, stopRecording, togglePause } from "../lib/record.svelte";
   import { fmtTime } from "../modes/media/session.svelte";
 
   /** Prefix of devices that record what the computer plays (see record.rs). */
@@ -39,12 +40,16 @@
 </script>
 
 <div class="recorder">
-  {#if rec.phase === "ready"}
+  {#if rec.phase === "ready" || rec.phase === "counting"}
     <button type="button" class="icon-btn close" aria-label="Close" title="Close (Esc)" onclick={closeRecorder}><X size={18} strokeWidth={1.5} /></button>
   {/if}
 
   <div class="center">
-    <p class="time num">{fmtTime(rec.seconds, true)}</p>
+    {#if rec.phase === "counting"}
+      <p class="time num count" aria-live="assertive">{rec.count}</p>
+    {:else}
+      <p class="time num">{fmtTime(rec.seconds, true)}</p>
+    {/if}
 
     <div class="strip" bind:clientWidth={width}>
       <canvas bind:this={strip} style:width="{width}px" style:height="72px"></canvas>
@@ -75,7 +80,16 @@
       {:else}
         <p class="dim">No microphone found.</p>
       {/if}
+      <label class="countin">
+        <span class="dim">Count 3, 2, 1 first</span>
+        <button type="button" class="switch" role="switch" aria-checked={ui.settings.countIn} aria-label="Count 3, 2, 1 before recording" onclick={() => updateSettings({ countIn: !ui.settings.countIn })}></button>
+      </label>
       <p class="hint dim">Recordings save as you go, in Music › Immediate Recordings.</p>
+    {:else if rec.phase === "counting"}
+      <div class="controls">
+        <button type="button" class="btn lg" onclick={cancelCountIn}><X size={16} strokeWidth={1.5} />Cancel</button>
+      </div>
+      <p class="hint dim">Recording starts at zero…</p>
     {:else}
       <div class="controls">
         <button type="button" class="btn lg" onclick={() => stopRecording(false)} disabled={rec.phase !== "recording"}>
@@ -116,6 +130,14 @@
     font-size: 40px;
     font-weight: var(--w-medium);
     letter-spacing: -0.01em;
+  }
+  .count {
+    color: var(--danger);
+  }
+  .countin {
+    display: flex;
+    align-items: center;
+    gap: var(--s2);
   }
   .strip {
     width: 100%;

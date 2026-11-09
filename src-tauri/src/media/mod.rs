@@ -160,18 +160,21 @@ pub async fn media_waveform<R: Runtime>(app: AppHandle<R>, path: String, buckets
 /// reduction, tone and leveling.
 #[tauri::command]
 #[allow(clippy::too_many_arguments)]
-pub async fn media_loudness<R: Runtime>(app: AppHandle<R>, path: String, segments: Vec<export::Segment>, gain_db: f64, eq: [f64; 3], denoise: bool, compress: bool) -> Result<(f64, bool), String> {
+pub async fn media_loudness<R: Runtime>(app: AppHandle<R>, path: String, segments: Vec<export::Segment>, sound: export::Sound, peak: bool) -> Result<(f64, bool), String> {
     let t = tools(&app)?;
     blocking(move || {
         let segs: Vec<export::Segment> = segments.into_iter().filter(|s| s.end - s.start > 0.01).collect();
         if segs.is_empty() {
             return Ok((0.0, false));
         }
-        let chain = export::shaping_chain(gain_db, eq, denoise, compress);
         let mut cmd = crate::tools::quiet_command(&t.ffmpeg);
-        cmd.args(["-hide_banner", "-nostats"]).args(export::measure_args(&path, &segs, 0, &chain));
+        cmd.args(["-hide_banner", "-nostats"]).args(export::measure_args(&path, &segs, 0, &sound, peak));
         let out = cmd.output().map_err(|e| e.to_string())?;
-        let (i, tp) = export::parse_loudness(&String::from_utf8_lossy(&out.stderr))?;
+        let messages = String::from_utf8_lossy(&out.stderr);
+        if peak {
+            return Ok((export::peak_gain(&messages)?, false));
+        }
+        let (i, tp) = export::parse_loudness(&messages)?;
         Ok(export::loudness_gain(i, tp))
     })
     .await

@@ -48,25 +48,26 @@ pub struct ExportRequest {
     mode: String,
     #[serde(default)]
     mute: bool,
-    /// Volume change in dB (0 = unchanged). Video is still copied when it's the only change.
-    #[serde(default)]
-    gain_db: f64,
+    /// Volume, tone, noise reduction, leveling, silenced parts (see `Sound`).
+    #[serde(flatten)]
+    sound: Sound,
     /// Fade in / out lengths in seconds (0 = none), on the saved result.
     #[serde(default)]
     fade_in: f64,
     #[serde(default)]
     fade_out: f64,
-    /// Even out loudness (EBU R128, -16 LUFS: a common level for speech and music online).
+    /// Even out loudness (EBU R128, -16 LUFS: a common level for speech and music online), or
+    /// with `normalize_peak`, raise or lower it so the loudest peak is at -1 dB.
     #[serde(default)]
     normalize: bool,
-    /// Tone in dB: bass (shelf below BASS_HZ), mid (peak at MID_HZ), treble (shelf above TREBLE_HZ).
     #[serde(default)]
-    eq: [f64; 3],
+    normalize_peak: bool,
+    /// Audio files: play the result backwards.
     #[serde(default)]
-    denoise: bool,
-    /// Gentle compressor that evens out loud and quiet parts.
+    reverse: bool,
+    /// Audio files: 1 (mono) or 2 (stereo); None keeps the original's channels.
     #[serde(default)]
-    compress: bool,
+    channels: Option<u32>,
     /// Picture: clockwise turn in degrees (0/90/180/270), mirror, crop of the turned picture.
     #[serde(default)]
     rotate: u32,
@@ -230,15 +231,59 @@ fn fmt_t(t: f64) -> String {
 
 /// The sound settings that come before loudness: volume, noise reduction, tone, leveling. The
 /// live preview plays the same steps in the same order (MediaEditor.svelte).
-pub(crate) fn shaping_chain(gain_db: f64, eq: [f64; 3], denoise: bool, compress: bool) -> Vec<String> {
-    let mut chain: Vec<String> = Vec::new();
-    if gain_db.abs() > 0.01 {
-        chain.push(format!("volume={gain_db:.2}dB"));
+/// The sound changes applied before loudness, in the order the live preview plays them
+/// (MediaEditor.svelte): volume, noise reduction, low/high cut, tone, equalizer, leveling.
+#[derive(Deserialize, Clone, Debug, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Sound {
+    /// Volume change in dB (0 = unchanged). Video is still copied when it's the only change.
+    pub gain_db: f64,
+    /// Tone in dB: bass (shelf below BASS_HZ), mid (peak at MID_HZ), treble (shelf above TREBLE_HZ).
+    pub eq: [f64; 3],
+    /// Graphic equalizer in dB, one per GEQ_HZ band (missing = 0).
+    pub geq: Vec<f64>,
+    /// Low cut (high-pass) and high cut (low-pass) in Hz; 0 = off.
+    pub low_cut: f64,
+    pub high_cut: f64,
+    pub denoise: bool,
+    /// Gentle compressor that evens out loud and quiet parts.
+    pub compress: bool,
+    /// Parts (source seconds) made silent.
+    pub silences: Vec<Segment>,
+}
+
+impl Sound {
+    /// Anything here that needs the sound filtered (volume alone doesn't).
+    pub fn shapes(&self) -> bool {
+        self.eq.iter().chain(self.geq.iter()).any(|g| g.abs() > 0.05)
+            || self.low_cut > 0.0
+            || self.high_cut > 0.0
+            || self.denoise
+            || self.compress
+            || !self.silences.is_empty()
     }
-    if denoise {
+}
+
+/// Graphic equalizer bands (Hz), one octave apart; each a peak filter at Q GEQ_Q.
+pub const GEQ_HZ: [u32; 10] = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+const GEQ_Q: f64 = 1.41;
+
+pub(crate) fn shaping_chain(s: &Sound) -> Vec<String> {
+    let mut chain: Vec<String> = Vec::new();
+    if s.gain_db.abs() > 0.01 {
+        chain.push(format!("volume={:.2}dB", s.gain_db));
+    }
+    if s.denoise {
         chain.push("afftdn=nf=-25".into());
     }
-    let [bass, mid, treble] = eq;
+    // Butterworth (Q 0.707), like the Web Audio filters heard while playing.
+    if s.low_cut > 0.0 {
+        chain.push(format!("highpass=f={:.0}:t=q:w=0.707", s.low_cut));
+    }
+    if s.high_cut > 0.0 {
+        chain.push(format!("lowpass=f={:.0}:t=q:w=0.707", s.high_cut));
+    }
+    let [bass, mid, treble] = s.eq;
     if bass.abs() > 0.05 {
         // Q 0.707 matches the Web Audio shelves heard while playing (slope 1).
         chain.push(format!("bass=g={bass:.1}:f={BASS_HZ}:t=q:w=0.707"));
@@ -249,10 +294,24 @@ pub(crate) fn shaping_chain(gain_db: f64, eq: [f64; 3], denoise: bool, compress:
     if treble.abs() > 0.05 {
         chain.push(format!("treble=g={treble:.1}:f={TREBLE_HZ}:t=q:w=0.707"));
     }
-    if compress {
+    for (f, g) in GEQ_HZ.iter().zip(s.geq.iter()) {
+        if g.abs() > 0.05 {
+            chain.push(format!("equalizer=f={f}:t=q:w={GEQ_Q}:g={g:.1}"));
+        }
+    }
+    if s.compress {
         chain.push("acompressor=threshold=-20dB:ratio=3:attack=15:release=250:makeup=2".into());
     }
     chain
+}
+
+/// Silences the chosen parts, sample-exact, by source time (so it goes before any trim).
+pub(crate) fn silence_filter(s: &Sound) -> Option<String> {
+    if s.silences.is_empty() {
+        return None;
+    }
+    let parts: Vec<String> = s.silences.iter().map(|p| format!("between(t,{:.6},{:.6})", p.start, p.end)).collect();
+    Some(format!("aeval=exprs='val(ch)*not({})':c=same", parts.join("+")))
 }
 
 /// "Even out loudness" as one fixed volume change: the gain (dB) that brings the track to -16
@@ -277,23 +336,39 @@ pub(crate) fn loudness_filters(integrated: f64, true_peak: f64) -> Vec<String> {
 }
 
 /// The ffmpeg arguments that measure audio track `track` over the kept `segs`, after `chain`.
-pub(crate) fn measure_args(source: &str, segs: &[Segment], track: usize, chain: &[String]) -> Vec<String> {
+/// Measures the kept parts after the sound chain: loudness (loudnorm's JSON) or, with `peak`,
+/// the loudest sample (volumedetect's max_volume).
+pub(crate) fn measure_args(source: &str, segs: &[Segment], track: usize, sound: &Sound, peak: bool) -> Vec<String> {
     let mut fc = String::new();
     let mut ins = String::new();
+    let quiet = silence_filter(sound).map(|f| format!("{f},")).unwrap_or_default();
     for (i, s) in segs.iter().enumerate() {
-        fc.push_str(&format!("[0:a:{track}]atrim=start={}:end={},asetpts=PTS-STARTPTS[s{i}];", fmt_t(s.start), fmt_t(s.end)));
+        fc.push_str(&format!("[0:a:{track}]{quiet}atrim=start={}:end={},asetpts=PTS-STARTPTS[s{i}];", fmt_t(s.start), fmt_t(s.end)));
         ins.push_str(&format!("[s{i}]"));
     }
     fc.push_str(&format!("{ins}concat=n={}:v=0:a=1", segs.len()));
-    for c in chain {
+    for c in shaping_chain(sound) {
         fc.push(',');
-        fc.push_str(c);
+        fc.push_str(&c);
     }
-    fc.push_str(",loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json[m]");
+    fc.push_str(if peak { ",volumedetect[m]" } else { ",loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json[m]" });
     ["-i", source, "-filter_complex", &fc, "-map", "[m]", "-f", "null", "-"].iter().map(|s| s.to_string()).collect()
 }
 
 /// Reads (integrated LUFS, true peak dBTP) from loudnorm's report in ffmpeg's messages.
+/// Gain (dB) that puts the loudest peak at -1 dB, from volumedetect's output.
+pub(crate) fn peak_gain(messages: &str) -> Result<f64, String> {
+    let max = messages
+        .lines()
+        .find_map(|l| l.split("max_volume:").nth(1))
+        .and_then(|v| v.trim().trim_end_matches("dB").trim().parse::<f64>().ok())
+        .ok_or("Silent track.")?;
+    if max <= -90.0 {
+        return Err("Silent track.".into());
+    }
+    Ok((-1.0 - max).clamp(-30.0, 30.0))
+}
+
 pub(crate) fn parse_loudness(messages: &str) -> Result<(f64, f64), String> {
     let json = messages.rfind('{').and_then(|a| messages[a..].find('}').map(|b| &messages[a..=a + b])).ok_or("Couldn’t measure the loudness.")?;
     let v: Value = serde_json::from_str(json).map_err(|e| e.to_string())?;
@@ -515,6 +590,17 @@ fn with_format(args: Vec<String>, k: usize, ext: &str, rate: Option<u32>, depth:
     out
 }
 
+/// One sound track's settings with a new channel count (mono or stereo), if any.
+fn with_channels(mut args: Vec<String>, k: usize, channels: Option<u32>) -> Vec<String> {
+    let Some(c) = channels else { return args };
+    let key = format!("-ac:a:{k}");
+    match args.iter().position(|x| *x == key) {
+        Some(i) => args[i + 1] = c.to_string(),
+        None => args.extend([key, c.to_string()]),
+    }
+    args
+}
+
 fn keep(flags: &[bool], i: usize) -> bool {
     flags.get(i).copied().unwrap_or(true)
 }
@@ -575,8 +661,8 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
 
     // Fades, loudness, tone and speed change the sound over the whole result, so they need the
     // frame-exact path (for audio files that costs nothing extra: audio is re-encoded either way).
-    let tone = req.eq.iter().any(|g| g.abs() > 0.05) || req.denoise || req.compress;
-    let shaping = !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || tone || sped);
+    let reverse = req.reverse && !has_video;
+    let shaping = !audio.is_empty() && (req.fade_in > 0.0 || req.fade_out > 0.0 || req.normalize || req.sound.shapes() || sped || reverse);
     let turned = video_out && (!req.rotate.is_multiple_of(360) || req.flip);
     let crop = if video_out { req.crop.and_then(Crop::effective) } else { None };
     let dest_ext = match req.target.as_str() {
@@ -611,7 +697,9 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     let redraw = video_out && (crop.is_some() || sped || anim || (turned && !convert::rotates_losslessly(&ext)));
     // A new sample rate or bit depth (audio files) means re-encoding the sound.
     let src_rate = audio.first().and_then(|(_, s)| s["sample_rate"].as_str()?.parse::<u32>().ok());
-    let reformat = !has_video && (req.sample_rate.is_some_and(|r| Some(r) != src_rate) || req.bit_depth.is_some());
+    let src_channels = audio.first().and_then(|(_, s)| s["channels"].as_u64()).map(|c| c as u32);
+    let channels = req.channels.filter(|c| matches!(c, 1 | 2) && !has_video && Some(*c) != src_channels);
+    let reformat = !has_video && (req.sample_rate.is_some_and(|r| Some(r) != src_rate) || req.bit_depth.is_some() || channels.is_some());
     // Lossless sound (WAV, FLAC, ALAC) loses nothing when re-encoded, so it is always cut that
     // way: to the exact sample, with a correct length in the header (copying FLAC keeps the old one).
     let lossless_sound = !has_video && audio.first().is_some_and(|(_, s)| is_pcm_or_lossless(s["codec_name"].as_str().unwrap_or_default()));
@@ -644,7 +732,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
     };
 
     let movflags: Vec<String> = if matches!(ext.as_str(), "mp4" | "m4v" | "mov" | "m4a") { vec!["-movflags".into(), "+faststart".into()] } else { vec![] };
-    let gain: Vec<String> = if req.gain_db.abs() > 0.01 && !audio.is_empty() { vec!["-af".into(), format!("volume={:.2}dB", req.gain_db)] } else { vec![] };
+    let gain: Vec<String> = if req.sound.gain_db.abs() > 0.01 && !audio.is_empty() { vec!["-af".into(), format!("volume={:.2}dB", req.sound.gain_db)] } else { vec![] };
     let source_cw = video.map(convert::source_rotation).unwrap_or(0);
     let display = if mode == "lossless" && turned { convert::display_args(source_cw, req.rotate, req.flip) } else { vec![] };
     // How many subtitle tracks the main pass writes (added ones come after them).
@@ -745,8 +833,9 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                         fc.push_str(&format!("[0:v:0]trim=start={}:end={},setpts=PTS-STARTPTS[v{i}];", fmt_t(s.start), fmt_t(s.end)));
                         concat_in.push_str(&format!("[v{i}]"));
                     }
+                    let quiet = silence_filter(&req.sound).map(|f| format!("{f},")).unwrap_or_default();
                     for (k, (orig, _)) in audio.iter().enumerate() {
-                        fc.push_str(&format!("[0:a:{orig}]atrim=start={}:end={},asetpts=PTS-STARTPTS[a{k}_{i}];", fmt_t(s.start), fmt_t(s.end)));
+                        fc.push_str(&format!("[0:a:{orig}]{quiet}atrim=start={}:end={},asetpts=PTS-STARTPTS[a{k}_{i}];", fmt_t(s.start), fmt_t(s.end)));
                         concat_in.push_str(&format!("[a{k}_{i}]"));
                     }
                 }
@@ -779,7 +868,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     }
                 }
                 // The sound: volume, tone… then speed, loudness, fades.
-                let pre = shaping_chain(req.gain_db, req.eq, req.denoise, req.compress);
+                let pre = shaping_chain(&req.sound);
                 let mut fades: Vec<String> = Vec::new();
                 if req.fade_in > 0.0 {
                     fades.push(format!("afade=t=in:st=0:d={:.3}", req.fade_in.min(out_total)));
@@ -792,6 +881,9 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                 let measure_share = if req.normalize && na > 0 { 0.3 } else { 0.0 };
                 for (k, (orig, s)) in audio.iter().enumerate() {
                     let mut chain = pre.clone();
+                    if reverse {
+                        chain.push("areverse".into());
+                    }
                     if req.keep_pitch {
                         chain.extend(convert::atempo(speed));
                     } else if sped {
@@ -801,9 +893,14 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                     }
                     if req.normalize {
                         let share = measure_share / na as f64;
-                        let tail = run_ffmpeg_tail(app, ffmpeg, &measure_args(&req.source, &segs, *orig, &pre), total, share * k as f64, share, "export", true)?;
-                        // A silent track has no loudness to even out; leave it as it is.
-                        if let Ok((i, tp)) = parse_loudness(&tail.join("\n")) {
+                        let tail = run_ffmpeg_tail(app, ffmpeg, &measure_args(&req.source, &segs, *orig, &req.sound, req.normalize_peak), total, share * k as f64, share, "export", true)?;
+                        let text = tail.join("\n");
+                        // A silent track has nothing to even out; leave it as it is.
+                        if req.normalize_peak {
+                            if let Ok(g) = peak_gain(&text) {
+                                chain.push(format!("volume={g:.2}dB"));
+                            }
+                        } else if let Ok((i, tp)) = parse_loudness(&text) {
                             chain.extend(loudness_filters(i, tp));
                         }
                     }
@@ -925,7 +1022,7 @@ fn export<R: Runtime>(app: &AppHandle<R>, ffmpeg: &Path, req: &ExportRequest) ->
                             }
                             None => audio_settings(s, k),
                         };
-                        a.extend(if has_video { settings } else { with_format(settings, k, &ext, req.sample_rate, req.bit_depth) });
+                        a.extend(if has_video { settings } else { with_channels(with_format(settings, k, &ext, req.sample_rate, req.bit_depth), k, channels) });
                     }
                 }
                 a.extend(movflags.iter().cloned());
@@ -1260,11 +1357,30 @@ mod tests {
     #[test]
     fn measures_only_the_kept_parts_after_the_sound_chain() {
         let segs = [Segment { start: 0.0, end: 2.0 }, Segment { start: 5.0, end: 6.5 }];
-        let chain = shaping_chain(3.0, [6.0, 0.0, 0.0], false, true);
-        let a = measure_args("in.wav", &segs, 1, &chain).join(" ");
+        let sound = Sound { gain_db: 3.0, eq: [6.0, 0.0, 0.0], compress: true, ..Default::default() };
+        let a = measure_args("in.wav", &segs, 1, &sound, false).join(" ");
         assert!(a.contains("[0:a:1]atrim=start=5.000000:end=6.500000"), "{a}");
         assert!(a.contains("concat=n=2:v=0:a=1,volume=3.00dB,bass=g=6.0:f=200"), "{a}");
         assert!(a.contains("acompressor") && a.ends_with("print_format=json[m] -map [m] -f null -"), "{a}");
+        // Peak mode asks volumedetect instead.
+        assert!(measure_args("in.wav", &segs, 0, &sound, true).join(" ").contains("makeup=2,volumedetect[m]"));
+    }
+
+    #[test]
+    fn equalizer_cuts_and_silences() {
+        let mut geq = vec![0.0; 10];
+        geq[0] = 4.0;
+        geq[9] = -3.0;
+        let sound = Sound { geq, low_cut: 80.0, high_cut: 12000.0, silences: vec![Segment { start: 1.0, end: 1.5 }, Segment { start: 3.0, end: 4.0 }], ..Default::default() };
+        assert!(sound.shapes());
+        let chain = shaping_chain(&sound).join(",");
+        assert_eq!(chain, "highpass=f=80:t=q:w=0.707,lowpass=f=12000:t=q:w=0.707,equalizer=f=31:t=q:w=1.41:g=4.0,equalizer=f=16000:t=q:w=1.41:g=-3.0");
+        assert_eq!(silence_filter(&sound).unwrap(), "aeval=exprs='val(ch)*not(between(t,1.000000,1.500000)+between(t,3.000000,4.000000))':c=same");
+        // Volume alone doesn't need filters (the video can still be copied).
+        assert!(!Sound { gain_db: 3.0, ..Default::default() }.shapes());
+        assert_eq!(peak_gain("[Parsed_volumedetect_0 @ 0] max_volume: -7.5 dB").unwrap(), 6.5);
+        assert!(peak_gain("max_volume: -91.0 dB").is_err());
+        assert_eq!(with_channels(vec!["-c:a:0".into(), "flac".into(), "-ac:a:0".into(), "2".into()], 0, Some(1))[3], "1");
     }
 
     #[test]

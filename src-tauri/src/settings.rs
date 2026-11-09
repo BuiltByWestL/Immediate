@@ -38,6 +38,8 @@ pub struct Settings {
     pub hardware_encode: bool,
     /// Microphone the recorder starts with ("" = the system's default).
     pub record_device: String,
+    /// Count 3, 2, 1 before recording starts.
+    pub count_in: bool,
     /// Format audio files are saved in: "" (the same as the original) or an extension.
     pub audio_format: String,
     /// Keep Immediate running with no windows open, so the next file opens instantly.
@@ -65,6 +67,7 @@ impl Default for Settings {
             video_mode: "lossless".into(),
             hardware_encode: false,
             record_device: String::new(),
+            count_in: false,
             audio_format: String::new(),
             keep_ready: false,
             last_update_check: 0,

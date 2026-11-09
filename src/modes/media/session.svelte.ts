@@ -23,6 +23,19 @@ export interface MediaEdit {
   normalize: boolean;
   /** Bass, mid, treble in dB. */
   eq: [number, number, number];
+  /** Graphic equalizer, dB per band (GEQ_BANDS). */
+  geq: number[];
+  /** Low cut (high-pass) and high cut (low-pass) in Hz; 0 = off. */
+  lowCut: number;
+  highCut: number;
+  /** "Even out loudness" by the loudest peak (-1 dB) instead of loudness (-16 LUFS). */
+  normalizePeak: boolean;
+  /** Audio files: the result plays backwards. */
+  reverse: boolean;
+  /** Audio files: 1 (mono), 2 (stereo), null = as the original. */
+  channels: 1 | 2 | null;
+  /** Parts made silent (source seconds). */
+  silences: Range[];
   denoise: boolean;
   compress: boolean;
   /** Picture: clockwise turn (0/90/180/270), mirror, and a crop of the turned picture as
@@ -55,6 +68,9 @@ export interface Range2D {
   h: number;
 }
 
+/** Graphic equalizer bands (Hz); export.rs uses the same (GEQ_HZ), each a peak at Q 1.41. */
+export const GEQ_BANDS = [31, 62, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
 export function blankEdit(duration: number): MediaEdit {
   return {
     trim: { start: 0, end: duration },
@@ -66,6 +82,13 @@ export function blankEdit(duration: number): MediaEdit {
     fadeOut: 0,
     normalize: false,
     eq: [0, 0, 0],
+    geq: GEQ_BANDS.map(() => 0),
+    lowCut: 0,
+    highCut: 0,
+    normalizePeak: false,
+    reverse: false,
+    channels: null,
+    silences: [],
     denoise: false,
     compress: false,
     rotate: 0,
@@ -109,6 +132,8 @@ export const media = $state({
   view: { start: 0, end: 0 } as Range,
   /** The crop's shape while cropping: width / height in pixels, or null for any shape. */
   cropAspect: null as number | null,
+  /** Loudest sample of the file (0–1), from the waveform; for the clipping warning. */
+  peak: 0,
   /** The file's own cover art (an object URL), if it has one. */
   coverUrl: null as string | null,
 });
@@ -180,6 +205,12 @@ export function mediaChanged(): boolean {
       e.fadeOut > 0 ||
       e.normalize ||
       e.eq.some((g) => g !== 0) ||
+      e.geq.some((g) => g !== 0) ||
+      e.lowCut > 0 ||
+      e.highCut > 0 ||
+      e.reverse ||
+      e.channels !== null ||
+      e.silences.length > 0 ||
       e.denoise ||
       e.compress ||
       pictureChanged(e) ||
@@ -251,6 +282,23 @@ export function partAt(t: number): Range | null {
   const edges = [part.start, ...splits, part.end];
   for (let i = 0; i < edges.length - 1; i++) if (t >= edges[i] && t < edges[i + 1]) return { start: edges[i], end: edges[i + 1] };
   return null;
+}
+
+/** Makes the selection silent (audio). */
+export function silenceSelection() {
+  const s = media.selection;
+  if (!s) return;
+  const part = { ...s };
+  changeMedia((e) => e.silences.push(part));
+  media.selection = null;
+}
+
+/** Is source time `t` in a silenced part? */
+export const silencedAt = (t: number, e: MediaEdit = media.edit) => e.silences.some((s) => t >= s.start && t < s.end);
+
+/** The sound settings saving and measuring share (export.rs `Sound`). */
+export function soundOf(e: MediaEdit = media.edit) {
+  return { gainDb: e.gain, eq: [...e.eq], geq: [...e.geq], lowCut: e.lowCut, highCut: e.highCut, denoise: e.denoise, compress: e.compress, silences: e.silences.map((s) => ({ ...s })) };
 }
 
 /** Cuts out the selection. Returns where to put the playhead afterwards. */

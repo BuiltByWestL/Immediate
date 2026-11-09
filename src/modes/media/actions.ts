@@ -5,7 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { save as saveDialog } from "@tauri-apps/plugin-dialog";
 import { ask, openPaths, toast, ui } from "../../lib/app.svelte";
 import { ensureTools } from "../../lib/tools.svelte";
-import { keptSegments, media, mediaChanged, snappedSegments, startMediaEdit, stopMediaEdit } from "./session.svelte";
+import { keptSegments, media, mediaChanged, snappedSegments, soundOf, startMediaEdit, stopMediaEdit } from "./session.svelte";
 
 export async function beginMediaEdit() {
   const file = ui.file;
@@ -130,13 +130,13 @@ export async function saveMedia(target: "copy" | "as" | "replace", output: Media
         segments,
         mode: media.mode,
         mute: media.edit.mute,
-        gainDb: media.edit.gain,
+        ...soundOf(),
         fadeIn: media.edit.fadeIn,
         fadeOut: media.edit.fadeOut,
         normalize: media.edit.normalize,
-        eq: media.edit.eq,
-        denoise: media.edit.denoise,
-        compress: media.edit.compress,
+        normalizePeak: media.edit.normalizePeak,
+        reverse: media.edit.reverse,
+        channels: media.edit.channels,
         rotate: media.edit.rotate,
         flip: media.edit.flip,
         crop: media.edit.crop,
